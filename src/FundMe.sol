@@ -9,6 +9,8 @@ pragma solidity ^0.8.18;
 
 import {PriceConverter} from "./PriceConverter.sol";
 
+error NotOwner();
+
 contract FundMe {
     // to attach the Price Converter functions to all uint256s:
     using PriceConverter for uint256;
@@ -101,12 +103,31 @@ contract FundMe {
 
     modifier onlyOwner() {
         // requires the owner to be the only person allowed to call this withdraw function or reverts with "Must be Owner!"
-        require(msg.sender == i_owner, "Must be Owner!");
+        // require(msg.sender == i_owner, "Must be Owner!");
+
+        // changed to use custom errors to save a ton of gas since. This saves alot of gas since we do not need to store and emit the revert Strings if the require statement fails.
+        // this says that if the sender of the message is not the owner, then revert with custom error NotOwner.
+        if (msg.sender != i_owner) {
+            revert NotOwner();
+        }
 
         // always needs to be in the modifier because modifiers are executed first in functions, then this underscore shows that after the modifier code is executed, to then go on and execute the code in the fucntion with the modifier.
         _;
         // if we had the underscore above the logic in this modifier, this means that we would execute the logic in the function with this modifier first and then execute the modifier's logic. So the order of the underscore matters!!!
     }
 
+    // receive function is called when a transaction is sent to a contract that has no data. it can have not not have funds, but if it has no data, it will be received by the receive function. (the contract needs to have a receive function)
+    receive() external payable {
+        fund();
+    }
+
+    // fallback function is called when a transaction is sent to a contract with data, for example like if a user calls a function that does not exist, then it will be handled by the fallback function. (the contract needs to have a fallback function). the fallback function can also be used if the receive function is not defined.
+    fallback() external payable {
+        fund();
+    }
+
     // Note: view functions use gas when called by a contract but not when called by a person.
+
+    // if something is "unchecked", then that means when a value hits its max + 1, it will reset to 0.
+    // after 0.8.0 of solidity, if a number reaches its max, the number will then fail instead of reseting. instead of overflowing or underflowing, it just fails.
 }
