@@ -9,7 +9,9 @@ pragma solidity ^0.8.18;
 
 import {PriceConverter} from "./PriceConverter.sol";
 
-error NotOwner();
+// when naming your errors, always name them with the contract name so you know what contract it came from
+error FundMe__NotOwner(); // custom errors save a ton of gas
+// ^ two underscores is the convention ^
 
 contract FundMe {
     // to attach the Price Converter functions to all uint256s:
@@ -108,7 +110,7 @@ contract FundMe {
         // changed to use custom errors to save a ton of gas since. This saves alot of gas since we do not need to store and emit the revert Strings if the require statement fails.
         // this says that if the sender of the message is not the owner, then revert with custom error NotOwner.
         if (msg.sender != i_owner) {
-            revert NotOwner();
+            revert FundMe__NotOwner();
         }
 
         // always needs to be in the modifier because modifiers are executed first in functions, then this underscore shows that after the modifier code is executed, to then go on and execute the code in the fucntion with the modifier.
