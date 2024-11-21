@@ -132,11 +132,13 @@ There are 4 different test types:
 4. Staging: Testing our code in a real environment that is not production (testnet or sometimes mainnet for testing)
 
 If we need to test a part of our code that is outside of our system(example: pricefeed from chainlink) then we can write a test to test it, then we can fork a testnet or mainnet to check if it really works. You can do this by running:
- `forge test --mt <test-function-name> -vvv --fork-url $ENV_RPC_URL`
+ `forge test --mt <test-function-name> -vvv --fork-url $ENV_RPC_URL` - you can learn more about this and keeping it modular by looking at [the  section 7 Foundry FundMe course](https://updraft.cyfrin.io/courses/foundry/foundry-fund-me/refactoring-helper) and your codebase of foundry-fund-me-f23.
 
  for example: `forge test --mt testPriceFeedVersionIsAccurate -vvv --fork-url $SEPOLIA_RPC_URL`. Of course to use this you would have the RPC URL(that you can get from a node provider such as Alchemy) in your .env file. After adding a .env making sure to run `source .env` to add the environment variables. Also make sure you fork the correct chain where the logic is.
 
  run `forge coverage` to see how many lines of code have been tested.
+
+ you only want to deploy mocks when you are working on a local chain like anvil.
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
