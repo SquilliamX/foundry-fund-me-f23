@@ -8,6 +8,7 @@
 pragma solidity ^0.8.18;
 
 import {PriceConverter} from "./PriceConverter.sol";
+import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 
 // when naming your errors, always name them with the contract name so you know what contract it came from
 error FundMe__NotOwner(); // custom errors save a ton of gas
@@ -33,10 +34,16 @@ contract FundMe {
     address public immutable i_owner; // variables defined in seperate lines than where they are defined, can be marked as immutable if they will not change. This will save gas
     // immutable varibles should use "i_" in their name
 
+    // this variable is of type AggregatorV3Interface, and is used in the constructor. So that when deployed, the contract will read what chain we are on and use the correct pricefeed.
+    AggregatorV3Interface private s_priceFeed;
+
     // the constructor is a function that gets immediately called when the contract is deployed.
-    constructor() {
+    // the priceFeed parameter means that it takes a pricefeed address, and this will depend on the chain we are deploying to. This way the codebase is much more modular.
+    constructor(address priceFeed) {
+        // this pricefeed address is set in the deployment script input!
         // makes the deployer of this contract the "owner" of this contract.
         i_owner = msg.sender;
+        s_priceFeed = AggregatorV3Interface(priceFeed);
     }
 
     // the "payable" keyword is allows functions to be sent $ from users
@@ -46,7 +53,7 @@ contract FundMe {
         // 1e18 is equal to 1 ETH(which is also 1,000,000,000,000,000,000 wei(18-zeros)(which is also 1 * 10 ** 18(in solidity,  ** means exponent)))
         // require means if <first section> is false, then revert with the message of <second section>
         // because we are using the PriceConverter for all uint256, all uint256s now have access to getConversionRate. This way, when we write "msg.value.getConversionRate", the first value will be the first parameter, which is msg.value. So msg.value is ethAmount in the getConversionRate function. If we had a second parameter in the getConversaionRate, the second paramter would be whatever input would be passed into msg.value.getConversionRate() (in this case there is no second value).
-        require(msg.value.getConversionRate() >= MINIMUM_USD, "didn't send enough ETH"); // "didn't send enough ETH" is the revert message if it reverts if the user does not send more than 1 eth.
+        require(msg.value.getConversionRate(s_priceFeed) >= MINIMUM_USD, "didn't send enough ETH"); // "didn't send enough ETH" is the revert message if it reverts if the user does not send more than 1 eth.
         // msg.value is always in terms of ETH/wei
         // if the require statement fails, then all actions or code that have been executed in that function will revert as well.
         // if you send a failed transaction, you will still spend all as up to that failed transaction, if any remaining gas will be returned to the user.
@@ -101,6 +108,18 @@ contract FundMe {
 
         // require callSuccess to be true or it reverts with "Call Failed"
         require(callSuccess, "Call Failed");
+    }
+
+    function getVersion() public view returns (uint256) {
+        // this works because the address defined is correlated the functions "AggregatorV3Interface" and "version". We also imported the "AggregatorV3Interface" from chainlink.
+        // return AggregatorV3Interface(0x694AA1769357215DE4FAC081bf1f309aDC325306).version();
+        // ^ we refactored this code because it was hardcoded to sepolia, to make it more modular, we change it to (below): ^
+        return s_priceFeed.version();
+        // ^this is more modular because now it will get the address of the pricefeed dependant on the chain we deployed to. ^
+    }
+
+    function getDecimals() public view returns (uint8) {
+        return AggregatorV3Interface(0x694AA1769357215DE4FAC081bf1f309aDC325306).decimals();
     }
 
     modifier onlyOwner() {

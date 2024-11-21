@@ -106,12 +106,37 @@ contract FundMeTest is Test {
 
 ```
 
+you don't need to declare or deploy the libraries in your test setup. This is because:
+1. Libraries are different from contracts - they are not deployed independently in the same way contracts are.
+2. The PriceConverter library is already imported and linked to your FundMe contract
+3. Library functions can be called directly using the library name.
+
+In the above example we declared the fundMe variable and deployed a new contract of the fundMe contract in the setup function but this is not needed when testing libraries as libraries are of different type. Just import the library into the test file. Library functions marked as internal become part of the calling contract's code. You can call static library functions directly using the library name
 
 
+To run Tests: `forge test`
+To run tests with a detailed output: `forge test -vvvv`
+to run a singular test: `forge test --mt <test-function-name> -vvvv`
 
+you can use `-vv`, `-vvv`, `-vvvv`, `-vvvvv` after at the end of your `forge test` command.
 
+`-vv` = console.logs
+`-vvv` = stack traces and console.logs
+`-vvvv` = more detailed stack trace, console.logs and bytes.
+`-vvvvv`=
 
+There are 4 different test types:
+1. Unit: Testing a specific part of our code
+2. Integration: Testing how our code works with other parts of our code
+3. Forked: Testing our code on a simulated real environment
+4. Staging: Testing our code in a real environment that is not production (testnet or sometimes mainnet for testing)
 
+If we need to test a part of our code that is outside of our system(example: pricefeed from chainlink) then we can write a test to test it, then we can fork a testnet or mainnet to check if it really works. You can do this by running:
+ `forge test --mt <test-function-name> -vvv --fork-url $ENV_RPC_URL`
+
+ for example: `forge test --mt testPriceFeedVersionIsAccurate -vvv --fork-url $SEPOLIA_RPC_URL`. Of course to use this you would have the RPC URL(that you can get from a node provider such as Alchemy) in your .env file. After adding a .env making sure to run `source .env` to add the environment variables. Also make sure you fork the correct chain where the logic is.
+
+ run `forge coverage` to see how many lines of code have been tested.
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -299,6 +324,8 @@ This returns the data that we submitted of `123`. (NOTE: This returns the data w
 ## TIPS AND TRICKS
 
 run `forge fmt` to auto format your code.
+
+run `forge coverage` to see how many lines of code have been tested.
 
 
 
