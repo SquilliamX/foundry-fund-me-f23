@@ -20,6 +20,40 @@ pragma solidity 0.8.18; // like always
 contract ThisIsAnExample {/* contract logic goes here */} 
 ```
 
+### Variables
+The Following variable types must be saved at the contract level (not in any functions):
+
+#### Constants
+Variables that will never be updated or changed can be listed as constant. 
+For example:
+`uint8 public constant DECIMALS = 8; ` - constant veriable should be CAPITALIZED as seen in this example.
+Constant variables are directly embedded in the bytecode.
+
+
+#### Immutable
+Variables that are declared at the contract level but initialized in the constructor can be listed as Immutable:
+For Example:
+```javascript
+address public immutable i_owner; // As you can see immutable variables should be named with an `i_` infront of the name
+
+ constructor() {
+        i_owner = msg.sender; // As you can see immutable variables should be named with an `i_` infront of the name
+    }
+``` 
+Immutable variables are directly embedded in the bytecode when the contract is deployed and can only be set once during contract construction.
+
+#### Storage Variables
+Variables that are not constant or immutable but are declared at the contract level at saved in storage. So these variables should be named with `s_`.
+For Example:
+```javascript
+    address[] public s_funders;
+    mapping(address funder => uint256 amountFunded) public s_addressToAmountFunded;
+    AggregatorV3Interface private s_priceFeed;
+```
+State Variables declared at contract level by default ARE stored in storage.
+
+
+
 
 
 
@@ -139,6 +173,60 @@ If we need to test a part of our code that is outside of our system(example: pri
  run `forge coverage` to see how many lines of code have been tested.
 
  you only want to deploy mocks when you are working on a local chain like anvil.
+
+
+
+ ### Sending money in tests:
+ When writing a test in solidity and you want to pass money to the test, you write it like this:
+ ```javascript
+  function testFundUpdatesFundedDataStructure() public {
+        fundMe.fund{value: 10e18}();
+    }
+ ```
+ because the fund function that we are calling does not take any parameter, it should be written like `fundMe.fund{value: 10e18}();` and not like ``fundMe.fund({value: 10e18});``. This is because the fund function does not take any parameters but is payable. So {value: 10e18} is the value being passed while () is the parameters being passed. IF the fund function was written like `function fund(uint256 value) public payable {}` then the test line of `fundMe.fund({value: 10e18}); ` would indeed work.
+
+ ### CHEATCODES FOR TESTS
+ `makeAddr()` : This cheatcode creates a fake address for a fake person for testing Purposes.
+ For example:
+ ```javascript
+// creating a user so that he can send the transactions in our tests. "MakeAddr" is a cheatcode from foundry that allows use to make a fake address for someone for testing purposes (we named the address being made "user" and the person is called USER).
+    address USER = makeAddr("user");
+ ```
+
+`vm.deal()` : After we make a new fake person (see `makeAddr` above) the fake persons address/wallet needs funds in it in order for them to make transactions in our tests. So we `deal` them some fake money.
+For Example:
+```javascript
+// this is the amount that we are going to pass to the "USER" saved as a variable to avoid magic numbers.
+uint256 constant STARTING_BALANCE = 10 ether;
+
+function setup() public {
+ // we need to give the fake person "USER" some money so he has money in his wallet to make transactions with. This needs to go in the setup function because the setup function is always called before the tests when we run `forge test`
+        vm.deal(USER, STARTING_BALANCE);}
+```
+
+ `vm.prank()` : This cheatcode allows for the next call to be made by the user passed into it.
+ For example:
+ ```javascript
+ function testFundUpdatesFundedDataStructure() public {
+        vm.prank(USER); // the next transaction will be sent by "USER".
+        fundMe.fund{value: SEND_VALUE}(); // so this value is sent by the "USER"
+        uint256 amountFunded = fundMe.getAddressToAmountFunded(USER);
+        assertEq(amountFunded, SEND_VALUE);
+    }
+ ```
+ 
+ `vm.expectRevert()`: This cheatcode tells foundry that the next line in the test function is expected to revert. If the test/transaction reverts, then the test passes since we expect it to revert.
+ For Example:
+ ```javascript
+    // this test is making sure that if a user sends less than the minimum amount, the contract will revert and not allow it.
+    function testFundFailsWithoutEnoughEth() public {
+        // this is a cheat code in foundry. it is telling foundry that the next line should revert.
+        vm.expectRevert();
+
+        fundMe.fund(); // send zero value. this fails because there is a minimum that needs to be sent.
+            // so because we used expectRevert, this test passes.
+    }
+ ```
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 

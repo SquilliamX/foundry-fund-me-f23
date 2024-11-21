@@ -11,6 +11,15 @@ contract FundMeTest is Test {
     FundMe fundMe;
     // ^ we declare this at the contract level so it can be in scope to all functions in this contract ^
 
+    // creating a user so that he can send the transactions in our tests. "MakeAddr" is a cheatcode from foundry that allows use to make a fake address for someone for testing purposes(we named the address being made "user" and the person is called USER).
+    address USER = makeAddr("user");
+
+    // the amount we are sending in tests
+    uint256 constant SEND_VALUE = 0.1 ether;
+
+    // this is the amount that we are going to pass to the "USER" saved as a variable to avoid magic numbers.
+    uint256 constant STARTING_BALANCE = 10 ether;
+
     // every test contract needs to have a setup function. in this setup function, we deploy the contract that we are testing.
     // when we run `forge test`, the setup function always get called before any test function
     function setUp() external {
@@ -22,6 +31,8 @@ contract FundMeTest is Test {
         DeployFundMe deployFundMe = new DeployFundMe();
         // since the run function returns the fundMe contract and we save it as a variable named fundMe.
         fundMe = deployFundMe.run();
+        // we need to give the fake person "USER" some money so he has money in his wallet to make transactions with. This needs to go in the setup function because the setup function is always called before the tests when we run `forge test`
+        vm.deal(USER, STARTING_BALANCE);
     }
 
     // testing to make sure that the minimum deposit is indeed $5
@@ -61,5 +72,22 @@ contract FundMeTest is Test {
         // uint256 version = fundMe.getVersion();
         // assertEq(version, 4);
         // this two line test above fails! it fails because since we did not identify a chain, anvil spins up a chain, but the contract address does not exist on anvil!
+    }
+
+    // this test is making sure that if a user sends less than the minimum amount, the contract will revert and not allow it.
+    function testFundFailsWithoutEnoughEth() public {
+        // this is a cheat code in foundry. it is telling foundry that the next line should revert.
+        vm.expectRevert();
+
+        fundMe.fund(); // send zero value. this fails because there is a minimum that needs to be sent.
+            // so because we used expectRevert, this test passes.
+    }
+
+    // this test is testing to make sure that all the logic in the fund function works. This includes the keeping track of the mapping and pushing the user into the array.
+    function testFundUpdatesFundedDataStructure() public {
+        vm.prank(USER); // the next transaction will be sent by "USER".
+        fundMe.fund{value: SEND_VALUE}(); // so this value is sent by the "USER"
+        uint256 amountFunded = fundMe.getAddressToAmountFunded(USER);
+        assertEq(amountFunded, SEND_VALUE);
     }
 }

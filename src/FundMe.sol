@@ -24,11 +24,11 @@ contract FundMe {
     // constant variables should be capitalized and use underscores
 
     // an array of addresses called funders.
-    address[] public funders;
+    address[] private s_funders;
 
     // a mapping, mapping the addresses and their amount funded.
     // the names "funder" and "amountFunded" is "syntaxic sugar", just makes it easier to read
-    mapping(address funder => uint256 amountFunded) public addressToAmountFunded;
+    mapping(address funder => uint256 amountFunded) private s_addressToAmountFunded;
 
     // to be used in constructor
     address public immutable i_owner; // variables defined in seperate lines than where they are defined, can be marked as immutable if they will not change. This will save gas
@@ -58,14 +58,14 @@ contract FundMe {
         // if the require statement fails, then all actions or code that have been executed in that function will revert as well.
         // if you send a failed transaction, you will still spend all as up to that failed transaction, if any remaining gas will be returned to the user.
 
-        // the users whom successfully call this function will be added to the array.
-        funders.push(msg.sender);
-
         // this line keeps track of how much each sender has sent
         // you read it like: mapping(check the mapping) address => amount sent of the sender. So how much the sender sent = how much the sender has sent plus how much he is currently sending.
         // addressToAmountFunded[msg.sender] = addressToAmountFunded[msg.sender] + msg.value;
         //above is the old way. below is the shortcut with += . This += means we are adding the new value to the existing value that already exists.
-        addressToAmountFunded[msg.sender] += msg.value;
+        s_addressToAmountFunded[msg.sender] += msg.value;
+
+        // the users whom successfully call this function will be added to the array.
+        s_funders.push(msg.sender);
     }
 
     function withdraw() public onlyOwner {
@@ -75,14 +75,14 @@ contract FundMe {
 
         // in a for loop, you first give it the starting index, then the ending index, and then the step amount
         // for example, if you want to go start at the 0th index, end at the 10th index, and increase by 1 every time, then it would be for (uint256 i = 0; i <= 10; i++)
-        for (uint256 funderIndex = 0; funderIndex < funders.length; /* length of the funders array */ funderIndex++) {
+        for (uint256 funderIndex = 0; funderIndex < s_funders.length; /* length of the funders array */ funderIndex++) {
             /*++ means to add 1 after everytime we go through the following code in the brackets: */
             // we get the index position of the funders array, name this element funder
-            address funder = funders[funderIndex];
+            address funder = s_funders[funderIndex];
             // then we reset this funders amount(this is tracked by the mapping of "addressToAmountFunded") to 0 when he withdraws
-            addressToAmountFunded[funder] = 0;
+            s_addressToAmountFunded[funder] = 0;
         }
-        funders = new address[](0);
+        s_funders = new address[](0);
 
         // there are three ways to transfer the funds: transfer, send, and call
 
@@ -151,4 +151,21 @@ contract FundMe {
 
     // if something is "unchecked", then that means when a value hits its max + 1, it will reset to 0.
     // after 0.8.0 of solidity, if a number reaches its max, the number will then fail instead of reseting. instead of overflowing or underflowing, it just fails.
+
+    /**
+     * View / Pure Functions (These are going to be our Getters)
+     * Below are our Getter functions. by making storage variables private, they save more gas. Then by making view/pure functions to get the data within the private storage functions, it also makes the code much more readable.
+     * These are called getter functions because all they do is read and return private data from the contracts storage without modifying the contract state.
+     */
+
+    // This function allows anyone to check how much eth a specific address has funded to the contract.
+    function getAddressToAmountFunded(address fundingAddress) external view returns (uint256) {
+        // takes the fundingAddress parameter that users input and reads and returns the amount that that address has funded. It is accessing the mapping of s_addressToAmountFunded which stores the funding history.
+        return s_addressToAmountFunded[fundingAddress];
+    }
+
+    //this function allows anyone to input a number(index) and they will see whos address is at that index(number).
+    function getFunders(uint256 index) external view returns (address) {
+        return s_funders[index];
+    }
 }
