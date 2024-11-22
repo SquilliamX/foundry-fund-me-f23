@@ -329,8 +329,58 @@ in the exmaple above, we are deploying to anvil's blockchain with a fake private
 
 *** NEVER USE A .ENV FOR PRODUCTION BUILDS, ONLY USE A .ENV FOR TESTING ***
 
---------------------------------------------------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
+## Scripts
+
+### Getting Started with Scripts
+
+When writing Scripts, you must import the script directory from foundry. and if you are using console.log, then you must import console.log as well.
+For Example:
+```javascript
+import {Script, console} from "forge-std/Script.sol";
+contract DeployFundMe is Script {} // Also the deployment script MUST inherit the Script Directory.
+```
+
+All Script functions must have a `run()` function. 
+For example:
+```javascript
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.18;
+
+// we must import Script.sol to tell foundry that this is a script.
+import {Script} from "forge-std/Script.sol"; // we need to import the script package from foundry when working on scripts in foundry/solidity.
+import {FundMe} from "../src/FundMe.sol";
+import {HelperConfig} from "./HelperConfig.s.sol";
+
+// this script will deploy our smart contracts. we should always deploy smart contracts this way.
+// Script contracts always need to inherit from scripts
+contract DeployFundMe is Script {
+    // all deployments scripts need to have this "run" function because this will be the main function called when deploying the contract.
+    function run() external returns (FundMe) {
+        // this says that when we start this `run` function, it will create a new helperconfig of type HelperConfig contract.
+        HelperConfig helperConfig = new HelperConfig();
+        // because we send this before `vm.startBroadcast`, it is executing this code in a simulated environment. So it is grabbing the chainId that we are deploying to right before we deploy the contracts
+
+        // we get the activeNetwork's pricefeed address and save it as a variable called "ethUsdPriceFeed"
+        address ethUsdPriceFeed = helperConfig.activeNetworkConfig();
+        // `activeNetworkConfig` is a variable of type struct, so if we had more variables in the struct, depending on what we would want we should save it as (address ethUsdPriceFeed, address exampleAddress, , ,)
+
+        // "vm.startBroadcast" is a cheatcode from foundry. it tells foundry "everything after this line should be sent to the rpc"
+        vm.startBroadcast();
+        // this line says variable name "fundMe" of type contract FundMe is equal to a new FundMe contract that is now being created and the broadcast line deploys it.
+        // FundMe fundMe = new FundMe(); // this line throws a warning since we do not use the variable fundMe
+        // new FundMe(0x694AA1769357215DE4FAC081bf1f309aDC325306); // this also creates a new FundMe contract
+
+        // we use this because now it will be more modular. All we do is now change this address and it will update our entire codebase.
+        FundMe fundMe = new FundMe(ethUsdPriceFeed); // this address gets inputted into the FundMe constructor.
+        vm.stopBroadcast();
+        return fundMe; // because this returns the deployed fundMe contract, we can make changes and it will always return the change we made. making the testing easier and more modular.
+    }
+}
+```
+
+### Deploying A Script
 If you have a script, you can run a simulation of deploying to a blockchain with the command in your terminal of `forge script script/<file-name> --rpc-url http://<endpoint-url>` 
 
 example:
@@ -343,11 +393,54 @@ to deploy to a testnet or anvil run the command of `forge script script/<file-na
 example: 
 ` forge script script/DeploySimpleStorage.s.sol --rpc-url http://127.0.0.1:8545 --broadcast --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 `
 
+if you have multiple contracts in a file and only want to send one, you can send the one by running `forge script script/<file-name>:<contract-Name> --rpc-url http://<endpoint-url> --broadcast --private-key <private-key>`
+
+example: 
+` forge script script/Interactions.s.sol:FundFundMe --rpc-url http://127.0.0.1:8545 --broadcast --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 `
+
 *** HOWEVER WHEN DEPLOYING TO A REAL BLOCKCHAIN, YOU NEVER WANT TO HAVE YOUR PRIVATE KEY IN PLAIN TEXT ***
 
 *** ALWAYS USE A FAKE PRIVATE KEY FROM ANVIL OR A BURNER ACCOUNT FOR TESTING ***
 
 *** NEVER USE A .ENV FOR PRODUCTION BUILDS, ONLY USE A .ENV FOR TESTING ***
+
+
+### Interaction Scripts
+(its most likely easier to just use Cast Send to interact with deployed contracts.)
+
+You can write a script to interact with your deployed contract. This way, if you want to repeatedly call a function of interact with your contract for any reason, a script is a great way to do so as it makes these interactions reproducible. These interaction scripts should be saved in the script/Interactions folder!
+
+A great package to use is `Cyfrin Foundry DevOps` as it grabs your latest version of a deployed contract to interact with. Install it with `forge install Cyfrin/Foundry-devops --no-commit`.
+This package has a function that allows you to grab your lastest version of a deployed contract.
+For Example:
+```javascript
+// this is going to be our script for funding the fundMe contract
+contract FundFundMe is Script {
+    // amount we are funding with
+    uint256 constant SEND_VALUE = 0.01 ether;
+
+    function fundFundMe(address mostRecentlyDeplyed) public {
+        // `startBroadcast` sends all transactions between startBroadcast and stopBroadcast
+        vm.startBroadcast();
+
+        // takes an input parameter of an address, which is going to be the mostRecentlyDeplyed address of our contract and funds it with the amount we want.
+        FundMe(payable(mostRecentlyDeplyed)).fund{value: SEND_VALUE}();
+
+        vm.stopBroadcast();
+
+        console.log("Funded FundMe with %s", SEND_VALUE); // import the console.log from the script directory
+            // this console.log also lets us know when the transaction goes through because it pops up when the transaction goes through.
+    }
+
+    function run() external {
+        // grabs the most recent deployment from the broadcast folder. takes the name of the contract and the blockchain so it knows what to do
+        address mostRecentlyDeployed = DevOpsTools.get_most_recent_deployment("FundMe", block.chainid);
+        // calls the fundFundMe function to deploy funds to the most recently deployed contract
+        fundFundMe(mostRecentlyDeployed);
+    }
+}
+```
+Always write tests for scripts as getting them wrong and deploying them is a waste of money. Save the money and write the tests! But its most likely easier to just use Cast Send to interact with deployed contracts.
 
 
 --------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -447,6 +540,11 @@ Manually (Not Recommended):
 5. If done correctly, you will now be able to see your contracts that have been deployed in the contracts "read" tab.
 
 Programatically (Recommended):
+To programtically verify a contract, you must do it while deploying. When deploying, the command must end with `--verify --etherscan-api-key $ETHERSCAN_API_KEY -vvvv`. Make sure to have the `$ETHERSCAN_API_KEY` in your .env file!
+
+Example:
+`forge script script/DeployFundMe.s.sol:DeployFundMe --rpc-url $SEPOLIA_RPC_URL --account <accountName> --sender <address> --broadcast --verify --etherscan-api-key $ETHERSCAN_API_KEY -vvvv`
+
 
 
 
@@ -533,6 +631,79 @@ For example:
 
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+## MAKEFILE
+
+A makefile is a way to create your own shortcuts. terminal commands in solidity can be very long, so you can essentially route your own shortcuts for terminal commands.
+
+If you want to include the `.env` variables, then at the top of the MakeFile, write `--include .env`. Environment Variables must be have a $ in front of it and be wrapped in parenthesis(). Example: ` $(SEPOLIA_RPC_URL) `
+
+The way to create a short cut in a Makefile is to write the shortcut on the left, and the command that is being rerouted goes on the right in the following format:
+`build:; forge build`. OR the shortcut goes on the left, and the command being rerouted goes below and indented with TAB in the format of:
+```MakeFile
+build:
+    forge build 
+```
+
+Then to run a Makefile command, run `make <shortcut-name>`. Example: `make build` !!!
+For example:
+(the .PHONY is to tell the MakeFile that the commands are not folders)
+```MakeFile
+-include .env
+
+.PHONY: all test clean deploy fund help install snapshot format anvil 
+
+DEFAULT_ANVIL_KEY := 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+
+help:
+	@echo "Usage:"
+	@echo "  make deploy [ARGS=...]\n    example: make deploy ARGS=\"--network sepolia\""
+	@echo ""
+	@echo "  make fund [ARGS=...]\n    example: make deploy ARGS=\"--network sepolia\""
+
+all: clean remove install update build
+
+# Clean the repo
+clean  :; forge clean
+
+# Remove modules
+remove :; rm -rf .gitmodules && rm -rf .git/modules/* && rm -rf lib && touch .gitmodules && git add . && git commit -m "modules"
+
+install :; forge install chainaccelorg/foundry-devops@0.0.11 --no-commit && forge install smartcontractkit/chainlink-brownie-contracts@0.6.1 --no-commit && forge install foundry-rs/forge-std@v1.5.3 --no-commit
+
+# Update Dependencies
+update:; forge update
+
+build:; forge build
+
+test :; forge test 
+
+snapshot :; forge snapshot
+
+format :; forge fmt
+
+anvil :; anvil -m 'test test test test test test test test test test test junk' --steps-tracing --block-time 1
+
+NETWORK_ARGS := --rpc-url http://localhost:8545 --private-key $(DEFAULT_ANVIL_KEY) --broadcast
+
+ifeq ($(findstring --network sepolia,$(ARGS)),--network sepolia)
+	NETWORK_ARGS := --rpc-url $(SEPOLIA_RPC_URL) --private-key $(PRIVATE_KEY) --broadcast --verify --etherscan-api-key $(ETHERSCAN_API_KEY) -vvvv
+endif
+
+deploy:
+	@forge script script/DeployFundMe.s.sol:DeployFundMe $(NETWORK_ARGS)
+
+fund:
+	@forge script script/Interactions.s.sol:FundFundMe $(NETWORK_ARGS)
+
+withdraw:
+	@forge script script/Interactions.s.sol:WithdrawFundMe $(NETWORK_ARGS)
+```
+
+
+
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 ## Everything ZK-SYNC
 
 Zk-sync is a rollup L2.
