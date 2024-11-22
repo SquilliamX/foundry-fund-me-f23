@@ -185,6 +185,9 @@ If we need to test a part of our code that is outside of our system(example: pri
  ```
  because the fund function that we are calling does not take any parameter, it should be written like `fundMe.fund{value: 10e18}();` and not like ``fundMe.fund({value: 10e18});``. This is because the fund function does not take any parameters but is payable. So {value: 10e18} is the value being passed while () is the parameters being passed. IF the fund function was written like `function fund(uint256 value) public payable {}` then the test line of `fundMe.fund({value: 10e18}); ` would indeed work.
 
+ ### GAS INFO IN TESTS
+ When working on tests in anvil, the gas price defaults to 0. So for us to simulate transactions in test with actual gas prices, we need to tell our tests to actually use real gas prices. This is where `vm.txGasPrice` comes in. (See `vm.txGasPrice` below in cheatcodes for tests)
+
  ### CHEATCODES FOR TESTS
  `makeAddr()` : This cheatcode creates a fake address for a fake person for testing Purposes.
  For example:
@@ -215,7 +218,7 @@ function setup() public {
     }
  ```
  
- `vm.expectRevert()`: This cheatcode tells foundry that the next line in the test function is expected to revert. If the test/transaction reverts, then the test passes since we expect it to revert.
+   `vm.expectRevert()` : This cheatcode tells foundry that the next line in the test function is expected to revert. If the test/transaction reverts, then the test passes since we expect it to revert.
  For Example:
  ```javascript
     // this test is making sure that if a user sends less than the minimum amount, the contract will revert and not allow it.
@@ -227,6 +230,80 @@ function setup() public {
             // so because we used expectRevert, this test passes.
     }
  ```
+
+ `hoax` : This is vm.prank and vm.deal combined. (This is not a cheatcode but instead is apart of the Forge Standard library(slightly different from the cheatcodes)).
+ For Example:
+ ```javascript
+ function testWithdrawFromMultipleSenders() public funded {
+        // Arrange
+        uint160 numberofFunders = 10; // This is a uint160 because we use `hoax` here. and if you use `hoax` then to use number to generate address you must use uint160s. this is because uint160s have the same amount of bytes as addresses.
+        uint160 startingFundingIndex = 1;
+
+        for (uint160 i = startingFundingIndex; i <= numberofFunders; i++) {
+            hoax(address(i), SEND_VALUE); // hoax is vm.deal and vm.prank combined.
+            fundMe.fund{value: SEND_VALUE}();
+        }
+ ```
+As you can see from the example, `hoax` dealt money to the accounts in the loop and made it so that the next transactions would be from the accounts in the loop.
+
+
+`vm.startPrank` - `vm.stopPrank` : These cheat codes are like `vm.prank` except instead of just doing 1 transaction, all transactions between `vm.startPrank` and `vm.stopPrank` are simulated from an account.
+For example:
+```javascript
+vm.startprank(fundMe.getOwner()); // next transaction is from the owner
+fundMe.withdraw(); // owner withdraws
+vm.stopPrank;
+```
+
+`vm.txGasPrice` : Sets the gas factor since when working on anvil the gas factor is always 0. meaning that transactions will always cost not gas unless you tell anvil to use a gas factor.
+```javascript
+    // This is the gas price that we tell anvil to use with the cheat code `vm.txGasPrice`. We can set this number to anything.
+    uint256 constant GAS_PRICE = 1;
+    // ^ tells solidity to use gas of a factor by 1 because on anvil it is always set to 0 ^
+function ...
+   //In order to see how much gas a function is going to spend, we need to calculate the gas spend before and after.
+        // here we are checking how much gas is left before we call the withdraw function(which is the main thing we are testing).
+        uint256 gasStart = gasleft(); // gasleft() is a built in function in solidity.
+
+        vm.txGasPrice(GAS_PRICE); // tells solidity to use gas of a factor by 1 because on anvil it is always set to 0.
+        vm.prank(fundMe.getOwner()); // next transaction is from the owner
+        fundMe.withdraw(); // owner withdraws
+
+        // getting the balance of the gas after we finish calling the withdraw function.
+        uint256 gasEnd = gasleft();
+        // here we do the math to figure out how much gas we used taking the gasStart and subtracting it from the gasEnd and multiplying that number against the current gas price.
+        uint256 gasUsed = (gasStart - gasEnd) * tx.gasprice; //tx.gasprice is built into solidity that tells you the current gas price
+        // now when we run this test it will tell us how much gas was used.
+...
+```
+ ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ ## Chisel
+
+ To run chisel, run `chisel` in your terminal.
+ you can run `!help` in chisel to see everything you can do in the chisel terminal.
+
+ Chisel allows us to write solidity in our terminal and execute it line by line so we can quickly see if something works.
+
+For example, if we wrote (in chisel):
+`uint256 dog =1` (press ENTER)
+then we typed `dog` (PRESS ENTER)
+it would return: 
+```javascript
+Type: uint256
+├ Hex: 0x1
+├ Hex (full word): 0x1
+└ Decimal: 1
+```
+Another Example following the previous:
+```javascript
+➜ uint256 dogAndThree = dog + 3;
+➜ dogAndThree
+Type: uint256
+├ Hex: 0x4
+├ Hex (full word): 0x4
+└ Decimal: 4
+➜ 
+```
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -417,6 +494,11 @@ run `forge fmt` to auto format your code.
 
 run `forge coverage` to see how many lines of code have been tested.
 
+run `forge snapshot --mt <test-function-name>` to create a `.gas-snapshot` file to tell us exactly how much gas a test function uses.
+
+run `forge inspect <Contract-Name> storagelayout` and it will tell you the exact layout of storage that your contract has.
+
+run `cast storage <contract-address> <index-of-storage>` and it will tell you exactly what is in that storage slot. For example: `cast storage 0x12345..88 2`. (mapping and arrays take up a storage slot but they are blank because they are dynamic and can change lengths). if you dont add an index number than it will tell you the whole storage layout of the contract from etherscan (make sure you are connected to etherscan if you want this!).
 
 
 
