@@ -329,7 +329,7 @@ in the exmaple above, we are deploying to anvil's blockchain with a fake private
 
 *** NEVER USE A .ENV FOR PRODUCTION BUILDS, ONLY USE A .ENV FOR TESTING ***
 
---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 ## Scripts
 
@@ -443,9 +443,9 @@ contract FundFundMe is Script {
 Always write tests for scripts as getting them wrong and deploying them is a waste of money. Save the money and write the tests! But its most likely easier to just use Cast Send to interact with deployed contracts.
 
 
---------------------------------------------------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-BroadCast Folder notes:
+## BroadCast Folder:
 
 the `dry-run` folder is where the transactions with no blockchain specified go.
 
