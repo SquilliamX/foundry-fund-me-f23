@@ -194,4 +194,37 @@ contract FundMeTest is Test {
         assertEq(startingOwnerBalance + startingFundMeBalance, endingOwnerBalance);
         // you could also do `assertEq(startingOwnerBalance + startingFundMeBalance, address(fundMe).balance)` which is the same thing just without the variables.
     }
+
+    function testWithdrawFromMultipleSendersCheaper() public funded {
+        // Arrange
+        uint160 numberofFunders = 10; // This is a uint160 because we use `hoax` here. and if you use `hoax` then to use number to generate address you must use uint160s. this is because uint160s have the same amount of bytes as addresses.
+        uint160 startingFundingIndex = 1;
+
+        for (uint160 i = startingFundingIndex; i <= numberofFunders; i++) {
+            hoax(address(i), SEND_VALUE); // hoax is vm.deal and vm.prank combined.
+            fundMe.fund{value: SEND_VALUE}();
+        }
+
+        // getting the balance of the owner before he withdraws.
+        uint256 startingOwnerBalance = fundMe.getOwner().balance;
+
+        // get the balance of the fundMe contract after USER deposits.
+        uint256 startingFundMeBalance = address(fundMe).balance;
+
+        // Act:
+        vm.prank(fundMe.getOwner()); // next transaction is from the owner
+        fundMe.cheaperWithdraw(); // owner withdraws
+
+        // Assert:
+        // get the balance from the owner after he withdraws
+        uint256 endingOwnerBalance = fundMe.getOwner().balance;
+        // get the balance of the fundMe contract after owner withdraws
+        uint256 endingFundMeBalance = address(fundMe).balance;
+
+        // assert that the Fundme contract is 0 after the owner withdraws it all.
+        assertEq(endingFundMeBalance, 0); // you could also do `assertEq(address(fundMe).balance, 0);` which is the same thing just without the variable.
+        // assert that the owner's balance after he withdraw is equal to the balance of the owner before he withdrew added with the amount that was in the fundme contract
+        assertEq(startingOwnerBalance + startingFundMeBalance, endingOwnerBalance);
+        // you could also do `assertEq(startingOwnerBalance + startingFundMeBalance, address(fundMe).balance)` which is the same thing just without the variables.
+    }
 }

@@ -494,14 +494,41 @@ run `forge fmt` to auto format your code.
 
 run `forge coverage` to see how many lines of code have been tested.
 
-run `forge snapshot --mt <test-function-name>` to create a `.gas-snapshot` file to tell us exactly how much gas a test function uses.
+run `forge snapshot --mt <test-function-name>` to create a `.gas-snapshot` file to tell us exactly how much gas a test function uses. you could also run `forge snapshot` and it will create a `.gas-snapshot` file to tell us exactly how much gas each function in the contracts cost.
 
 run `forge inspect <Contract-Name> storagelayout` and it will tell you the exact layout of storage that your contract has.
 
 run `cast storage <contract-address> <index-of-storage>` and it will tell you exactly what is in that storage slot. For example: `cast storage 0x12345..88 2`. (mapping and arrays take up a storage slot but they are blank because they are dynamic and can change lengths). if you dont add an index number than it will tell you the whole storage layout of the contract from etherscan (make sure you are connected to etherscan if you want this!).
 
 
+Reading and writing from storage is 33x more expensive than reading and writing from memory. Try to keep reading and writing to memory at a minimum by reading and writing to memory instead.
+For example:
+```javascript
+  function cheaperWithdraw() public onlyOwner {
+        for (uint256 funderIndex = 0; funderIndex < s_funders.length; funderIndex++) { // this is repeatedly reading from storage and will cost a ton, Especially as the array gets longer.
+            address funder = s_funders[funderIndex];
+            s_addressToAmountFunded[funder] = 0;
+        }
+        s_funders = new address[](0);
+        (bool callSuccess, ) =
+            payable(msg.sender).call{value: address(this).balance}(""); 
+        require(callSuccess, "Call Failed");
+    }
+```
 
+```javascript
+  function cheaperWithdraw() public onlyOwner {
+        uint256 funderLength = s_funders.length; // this way we are only reading from the storage array `funders` one time and saving it as a memory variable
+        for (uint256 funderIndex = 0; funderIndex < funderLength; funderIndex++) { // then here we loop through the memory instead of the storage
+            address funder = s_funders[funderIndex];
+            s_addressToAmountFunded[funder] = 0;
+        }
+        s_funders = new address[](0);
+        (bool callSuccess, ) =
+            payable(msg.sender).call{value: address(this).balance}("");
+        require(callSuccess, "Call Failed");
+    }
+```
 
 
 

@@ -68,6 +68,20 @@ contract FundMe {
         s_funders.push(msg.sender);
     }
 
+    // we are making a cheaper Withdraw function because function `withdraw` is very expensive. When you read and write to storage it is very expensive. Whereas if you read and write to memory it is much much cheaper. Check evm.codes(website) to see how much each opcode cost in gas.
+    function cheaperWithdraw() public onlyOwner {
+        uint256 funderLength = s_funders.length; // this way we are only reading from the storage array `funders` one time and saving it as a memory variable
+        for (uint256 funderIndex = 0; funderIndex < funderLength; funderIndex++) {
+            // then here we loop through the memory instead of the storage
+            address funder = s_funders[funderIndex];
+            s_addressToAmountFunded[funder] = 0;
+        }
+        s_funders = new address[](0);
+        (bool callSuccess, /* bytes memory dataReturned */ ) =
+            payable(msg.sender).call{value: address(this).balance}(""); /*<- this is where we would put info of another function if we were calling another function(but we arent here so we leave it blank) */
+        require(callSuccess, "Call Failed");
+    }
+
     function withdraw() public onlyOwner {
         // for loop explanation:
         // [1, 2, 3, 4] elements   <-- below
