@@ -31,7 +31,7 @@ contract FundMe {
     mapping(address funder => uint256 amountFunded) private s_addressToAmountFunded;
 
     // to be used in constructor
-    address private immutable i_owner; // variables defined in seperate lines than where they are defined, can be marked as immutable if they will not change. This will save gas
+    address private immutable i_owner; // variables declared in the contract level but defined in the constructor, can be marked as immutable if they will not change. This will save gas
     // immutable varibles should use "i_" in their name
 
     // this variable is of type AggregatorV3Interface, and is used in the constructor. So that when deployed, the contract will read what chain we are on and use the correct pricefeed.
