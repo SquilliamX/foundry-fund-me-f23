@@ -1,6 +1,6 @@
 # Notes 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-## Getting Started
+## Getting Started Notes
 
 To start a new foundry project, run `forge init`
 To compile a foundry project, run `forge build`
@@ -48,9 +48,81 @@ Layout of Functions:
  9. external & public view & pure functions
 
 
+### CEI (Checks, Effects, Interactions) Notes
+ When writing smart contacts, you always want to follow the CEI (Checks, Effects, Interactions) pattern in order to prevent reentrancy vulnerabilities and other vulnerabilities.
+ This would look like
+
+ ```js
+function exampleCEI() public {
+    // Checks
+    // so this would be like require statements/conditionals
+
+    // Effects
+    // this would be updating all variables and emitting events
+
+    // Interactions
+    // This would be anything that interacts with users or the world. Examples include sending money to users, sending nfts, etc
+}
+ ```
 
 
-### Visibility Modifiers:
+### Modifier Notes:
+
+Sometimes you will type alot of the same code over and over. To keep things simple and non-redundant, you can use a modifier.
+
+Modifiers are written with a `_;` before/after the code logic. The `_;` means to execute the code before or after the modifier code logic. The modifier will always execute first in the code function so `_;` represents whether to execute the function logic before or after the modifier.
+example:
+```js
+ modifier raffleEntered() {
+        vm.prank(PLAYER);
+        // PLAYER pays the entrance fee and enters the raffle
+        raffle.enterRaffle{value: entranceFee}();
+        // vm.warp allows us to warp time ahead so that foundry knows time has passed.
+        vm.warp(block.timestamp + interval + 1); // current timestamp + the interval of how long we can wait before starting another audit plus 1 second.
+        // vm.roll rolls the blockchain forward to the block that you assign. So here we are only moving it up 1 block to make sure that enough time has passed to start the lottery winner picking in raffle.sol
+        vm.roll(block.number + 1);
+        // completes the rest of the function that this modifier is applied to
+        _;
+    }
+```
+In this example the `_;` is after the modifier code logic to say that the modifier should be executed first, then the function it is applied to's logic should be execute afterwards. If the `_;` was before the modifier code logic, then it whould mean to execute the function it is applied to's logic before the modifier and then do the modifier logic afterwards 
+
+
+Modifiers go after the visibility modifiers in the function declaration. 
+example:
+```js
+ function testPerformUpkeepUpdatesRafflesStateAndEmitsRequestId() public raffleEntered {
+        // Act
+        // record all logs(including event data) from the next call
+        vm.recordLogs();
+        // call performUpkeep
+        raffle.performUpkeep("");
+        // take the recordedLogs from `performUpkeep` and stick them into the entries array
+        Vm.Log[] memory entries = vm.getRecordedLogs();
+        // entry 0  is for the VRF coordinator
+        // entry 1 is for our event data
+        // topic 0 is always resevered for
+        // topic 1 is for our indexed parameter
+        bytes32 requestId = entries[1].topics[1];
+
+        // Assert
+        // gets the raffleState and saves it in a variable named raffleState
+        Raffle.RaffleState raffleState = raffle.getRaffleState();
+        // assert that the requestId was indeed sent, if it was zero then no request Id was sent.
+        assert(uint256(requestId) > 0);
+        // this is asserting that the raffle state is `calculating` instead of `OPEN`
+        assert(uint256(raffleState) == 1);
+        // this is the same as saying what is below:
+        // assert(raffleState == Raffle.RaffleState.CALCULATING);
+        //         enum RaffleState {
+        //     OPEN,      // index 0
+        //     CALCULATING // index 1
+        // }
+    }
+```
+In this example, the modifier is `raffleEntered`. 
+
+### Visibility Modifier Notes: 
 
 There are 4 types of visibility modifiers in solidity. Public, Private, External, Internal.
 
@@ -146,17 +218,22 @@ contract Example {
 - Be explicit about visibility (don't rely on defaults)
 - Remember that private doesn't mean secret - data is still visible on the blockchain
 
-### Variables
-The Following variable types must be declared at the contract level (not in any functions):
+### Variable Notes
+All of the value types variables are: `boolean`, `unit`(only positive), `int`(postive or negative), `string`, `bytes`, `address`
 
-#### Constants
+The reference types of variables are: `arrays`, `structs`, `mappings`. 
+
+
+The Followings variable must be declared at the contract level (not in any functions):
+
+#### Constant Notes
 Variables that will never be updated or changed can be listed as constant. 
 For example:
 `uint8 public constant DECIMALS = 8; ` - constant veriable should be CAPITALIZED as seen in this example.
 Constant variables are directly embedded in the bytecode. This saves gas.
+`constant` is a state mutability modifier.
 
-
-#### Immutable
+#### Immutable Note
 Variables that are declared at the contract level but initialized in the constructor can be listed as Immutable. This saves gas.
 For Example:
 ```javascript
@@ -167,8 +244,9 @@ address public immutable i_owner; // As you can see immutable variables should b
     }
 ``` 
 Immutable variables are directly embedded in the bytecode when the contract is deployed and can only be set once during contract construction.
+`immutable` is a state mutability modifier.
 
-#### Storage Variables
+#### Storage Variable Notes
 Variables that are not constant or immutable but are declared at the contract level at saved in storage. So these variables should be named with `s_`.
 For Example:
 ```javascript
@@ -177,9 +255,10 @@ For Example:
     AggregatorV3Interface private s_priceFeed;
 ```
 State Variables declared at contract level by default ARE stored in storage.
+Storage variables are mutable by default (can be changes at anytime), so there isn't a specific state mutability modifier.
 
 
-#### Saving Gas with Storage Variables
+#### Saving Gas with Storage Variable Notes
 
 If you have a storage variable or immutable variables (not constant variables), then you can save gas and make the contract more reeadable by making the storage/immutable variables `private` and making a getter function that grabs the storage variable.
 Example:
@@ -218,7 +297,7 @@ Example:
     }
 ```
 
-#### Custom Error Variables
+#### Custom Error Variable Notes
 
 Reverting with strings is not good because it costs too much gas. Instead, save the error as a custome error and revert with the custom error.
 Example:
@@ -238,8 +317,212 @@ contract Raffle {
 }
 ```
 
-### Events
-When a storage variable is updated, we should always emit an event. This makes migration/version-updates of contracts much easier and events make front-end "indexing" much easier. It allows for the smart contract, front-end, and blockchain to easily know when something has been updated.
+To make custome errors even easier for users or devs to read when they get this error, we can let them know why they go this error:
+Example
+```js
+contract Raffle {
+    error Raffle__UpkeepNotNeeded(uint256 balance, uint256 playerslength, uint256 raffleState);
+
+
+    function performUpkeep(bytes calldata /* performData */ ) external {
+        //
+        (bool upkeepNeeded,) = checkUpkeep("");
+        //
+        if (!upkeepNeeded) {
+            revert Raffle__UpkeepNotNeeded(
+                address(this).balance,
+                s_players.length,
+                uint256(
+                    s_raffleState /*This could be a Rafflestate raffleState as well. Since enums map to their indexed position it can also be uint256(s_raffleState) since we have this defined as well */
+                )
+            );
+        }
+}
+```
+
+#### Reference Types Variable Notes
+
+The reference types of variables are: `arrays`, `structs`, `mappings`. 
+
+##### Array Notes
+
+There are two types of Arrays, static and dynamic.
+Dynamic array: the size of the array can grow and shrink
+Static array: the size is fixed: example: Person[3]
+
+
+Setting up an array variable:
+Examples:
+```js
+// an array of addresses called funders.
+    address[] private s_funders;
+
+// address array(list) of players who enter the raffle
+address payable[] private s_players; // this array is NOT constant because this array will be updated everytime a new person enters the raffle.
+// ^ this is payable because someone in this raffle will win the money and they will need to be able to receive the payout
+```
+
+Pushing items into an array example:
+```js
+ // You can create your own types by using the "struct" keyword
+    struct Person {
+        // for every person, they are going to have a favorite number and a name:
+        uint256 favoriteNumber; // slot 0
+        string name; // slot 1
+    }
+
+    //dynamic array of type struct person
+    Person[] public listOfPeople; // Gets defaulted to a empty array
+
+     // arrays come built in with the push function that allows us to add elements to an array
+    function addPerson(string memory _name, uint256 _favoriteNumber) public {
+        // pushes(adds) a user defined person into the Person array
+        listOfPeople.push(Person(_favoriteNumber, _name));
+
+        // adds the created mapping to this function, so that when you look up a name, you get their favorite number back
+        nameToFavoriteNumber[_name] = _favoriteNumber;
+    }
+```
+
+To reset an array:
+Example:
+```js
+ function fulfillRandomWords(uint256 requestId, uint256[] calldata randomWords) internal override {
+        uint256 indexOfWinner = randomWords[0] % s_players.length; 
+        address payable recentWinner = s_players[indexOfWinner];
+        s_recentWinner = recentWinner;
+        s_raffleState = RaffleState.OPEN;
+
+        // s_players gets updated to a new address array of size 0 to start(since it removed all items in the array, it starts a 0) that is also payable
+        s_players = new address payable[](0); // resets the array
+
+        // updates the current timestamp into the most recent timestamp so we know when this raffle started
+        s_lastTimeStamp = block.timestamp;
+
+        (bool success,) = s_recentWinner.call{value: address(this).balance}("");
+        if (!success) {
+            revert Raffle__TransferFailed();
+        }
+        emit WinnerPicked(s_recentWinner);
+    }
+```
+
+##### Struct Notes
+Structs are custom data types that let you create your own complex data structure by grouping together different variables. They're like creating a template for a custom object.
+
+Example:
+```js
+ // You can create your own types by using the "struct" keyword
+    struct Person {
+        // for every person, they are going to have a favorite number and a name:
+        uint256 favoriteNumber; // slot 0
+        string name; // slot 1
+    }
+
+//dynamic array of type struct `person`
+Person[] public listOfPeople; // Gets defaulted to a empty array
+
+ // arrays come built in with the push function that allows us to add elements to an array
+function addPerson(string memory _name, uint256 _favoriteNumber) public {
+// pushes(adds) a user defined person into the Person array
+listOfPeople.push(Person(_favoriteNumber, _name));
+// adds the created mapping to this function, so that when you look up a name, you get their favorite number back
+nameToFavoriteNumber[_name] = _favoriteNumber;
+    }
+```
+
+##### Mapping Notes
+Mappings are key-value pair data structures, similar to hash tables or dictionaries in other languages. They're unique in Solidity because all possible keys exist by default and map to a value of 0/false/empty depending on the value type.
+
+examples:
+```js
+// mapping types are like a search functionality or dictionary
+    mapping(string => uint256) public nameToFavoriteNumber;
+
+    function addPerson(string memory _name, uint256 _favoriteNumber) public {
+        // pushes(adds) a user defined person into the Person array
+        listOfPeople.push(Person(_favoriteNumber, _name));
+
+        // adds the created MAPPING to this function, so that when you look up a name, you get their favorite number back
+        nameToFavoriteNumber[_name] = _favoriteNumber;
+    }
+```
+```js
+    // a mapping, mapping the addresses and their amount funded.
+    // the names "funder" and "amountFunded" is "syntaxic sugar", just makes it easier to read
+    mapping(address funder => uint256 amountFunded) private s_addressToAmountFunded;
+
+    function fund() public payable {
+     
+        require(msg.value.getConversionRate(s_priceFeed) >= MINIMUM_USD, "didn't send enough ETH");
+
+        // this line keeps track of how much each sender has sent
+        // you read it like: mapping(check the mapping) address => amount sent of the sender. So how much the sender sent = how much the sender has sent plus how much he is currently sending.
+        // addressToAmountFunded[msg.sender] = addressToAmountFunded[msg.sender] + msg.value;
+        //above is the old way. below is the shortcut with += . This += means we are adding the new value to the existing value that already exists.
+        s_addressToAmountFunded[msg.sender] += msg.value;
+
+        // the users whom successfully call this function will be added to the array.
+        s_funders.push(msg.sender);
+    }
+
+     function cheaperWithdraw() public onlyOwner {
+        uint256 funderLength = s_funders.length;
+        for (uint256 funderIndex = 0; funderIndex < funderLength; funderIndex++) {
+            address funder = s_funders[funderIndex];
+            
+            // then we reset this funders amount(this is tracked by the mapping of "addressToAmountFunded") to 0 when he withdraws
+            s_addressToAmountFunded[funder] = 0;
+        }
+        s_funders = new address[](0);
+        (bool callSuccess, ) =
+            payable(msg.sender).call{value: address(this).balance}(""); 
+        require(callSuccess, "Call Failed");
+    }
+
+    /* Getter Function since the mapping is private to save gas */
+
+     // This function allows anyone to check how much eth a specific address has funded to the contract.
+    function getAddressToAmountFunded(address fundingAddress) external view returns (uint256) {
+        // takes the fundingAddress parameter that users input and reads and returns the amount that that address has funded. It is accessing the mapping of s_addressToAmountFunded which stores the funding history.
+        return s_addressToAmountFunded[fundingAddress];
+    }
+```
+
+
+### Constructor Notes
+Constructors are special functions that are executed only once when a contract is deployed.
+
+Constructor Facts:
+- Called once during contract creation
+- Used to initialize state variables
+- Cannot be called after contract deployment
+- Only one constructor per contract
+
+Example:
+```js
+contract Raffle {
+
+    uint256 private immutable i_entranceFee; 
+    uint256 private immutable i_interval;
+
+    uint256 private s_lastTimeStamp;
+
+    // this constructor takes a entranceFee and interval, so when the owner deploys this contract, he will input what these variables are equal to.
+    constructor(uint256 entranceFee, uint256 interval) {
+        i_entranceFee = entranceFee;
+        i_interval = interval;
+        // at contract deployment, the s_lastTimeStamp will record the timestamp of the block in which the contract is deployed. This value will be used as the initial timestamp for the raffle contract.
+        s_lastTimeStamp = block.timestamp;
+    }
+}
+```
+
+### Event Notes
+When a storage variable is updated, we should always emit an event. This makes migration/version-updates of contracts much easier and events make front-end "indexing" much easier. It allows for the smart contract, front-end, and blockchain to easily know when something has been updated. You can only have 3 indexed events per event and can have non indexed data. Indexed data is basically filtered data that is easy to read from the blockchain and non-indexed data will be abi-encoded on the blockchain and much much harder to read.
+
+The indexed parameter in events are called "Topics".
+
 Example:
 ```javascript
 
@@ -268,12 +551,265 @@ contract Raffle() {
 }
 ```
 
+### Enum Notes
+
+An Enum (enumeration) is a type declaration. An enum is a way to create a user-defined type with a fixed set of constant values or states. It's useful for representing a fixed number of options or states in a more readable way.
+
+Examples:
+```js                                   
+contract Raffle {
+
+      /* Type Declarations */
+        enum RaffleState {
+        OPEN, // index 0
+        CALCULATING // index 1
+    }
+
+    // The state of the raffle of type RaffleState(enum)
+    RaffleState private s_raffleState;
+
+    constructor(
+        uint256 entranceFee,
+        uint256 interval,
+        address vrfCoordinator,
+        bytes32 gasLane,
+        uint256 subscriptionId,
+        uint32 callbackGasLimit
+    ) VRFConsumerBaseV2Plus(vrfCoordinator) {
+        i_entranceFee = entranceFee;
+        i_interval = interval;
+        i_keyHash = gasLane;
+        i_subscriptionId = subscriptionId;
+        i_callbackGasLimit = callbackGasLimit;
+        s_lastTimeStamp = block.timestamp;
+
+        // when the contract is deployed it will be open
+        s_raffleState = RaffleState.OPEN; // this would be the same as s_raffleState = RaffleState.(0) since open in the enum is in index 0
+    }
+
+    function enterRaffle() external payable {
+        if (msg.value < i_entranceFee) {
+            revert Raffle__SendMoreToEnterRaffle();
+        }
+
+        // if the raffle is not open then any transactions to enterRaffle will revert
+        if (s_raffleState != RaffleState.OPEN) {
+            revert Raffle__RaffleNotOpen();
+        }
+
+        s_players.push(payable(msg.sender)); 
+        emit RaffleEntered(msg.sender); 
+    }
+
+    function pickWinner() external {
+        if ((block.timestamp - s_lastTimeStamp) < i_interval) {
+            revert();
+        }
+        // when someone calls the pickWinner, users will no longer be able to join the raffle since the state of the raffle has changed to calculating and is no longer open.
+        s_raffleState = RaffleState.CALCULATING;
+
+       ...
+    }
+
+    function fulfillRandomWords(uint256 requestId, uint256[] calldata randomWords) internal override {
+        uint256 indexOfWinner = randomWords[0] % s_players.length; 
+        address payable recentWinner = s_players[indexOfWinner];
+        s_recentWinner = recentWinner;
+
+        // the state of the raffle changes to open so players can join again.
+        s_raffleState = RaffleState.OPEN;
+
+        (bool success,) = s_recentWinner.call{value: address(this).balance}("");
+        if (!success) {
+            revert Raffle__TransferFailed();
+        }
+    }
+}
+
+
+```
+
+In enums:
+
+- You can only be in ONE state at a time
+- Each option has a number behind the scenes (starting at index 0)
+- You can't make up new options that aren't in the list of the Enum you created.
+
+
+
+
+
+### Inheritance Notes
+
+To inherit from another contract, import the contract and inherit it with `is` keyword.
+Example:
+```js
+// importing the Chainlink VRF
+import {VRFConsumerBaseV2Plus} from "@chainlink/contracts/src/v0.8/vrf/dev/VRFConsumerBaseV2Plus.sol";
+
+// inheriting the Chainlink VRF
+contract Raffle is VRFConsumerBaseV2Plus {}
+```
+After inheriting contracts, you can use variables from the parent contract in the child contract.
+
+
+
+#### Inheriting Constructor Notes
+
+If the contract you are inheriting from has a constructor, then the child contract(contract that is inheriting from the parent) needs to add that constructor.
+Example:
+
+Before Inheritance:
+```js
+contract Raffle {
+
+    uint256 private immutable i_entranceFee; 
+    uint256 private immutable i_interval;
+
+    uint256 private s_lastTimeStamp;
+
+    constructor(uint256 entranceFee, uint256 interval) {
+        i_entranceFee = entranceFee;
+        i_interval = interval;
+        s_lastTimeStamp = block.timestamp;
+    }
+}
+
+```
+
+
+Parent Contract we are inheriting from's constructor:
+```js
+abstract contract VRFConsumerBaseV2Plus is IVRFMigratableConsumerV2Plus, ConfirmedOwner {
+  error OnlyCoordinatorCanFulfill(address have, address want);
+  error OnlyOwnerOrCoordinator(address have, address owner, address coordinator);
+  error ZeroAddress();
+
+  // s_vrfCoordinator should be used by consumers to make requests to vrfCoordinator
+  // so that coordinator reference is updated after migration
+  IVRFCoordinatorV2Plus public s_vrfCoordinator;
+
+  /**
+   * @param _vrfCoordinator address of VRFCoordinator contract
+   */
+  constructor(address _vrfCoordinator) ConfirmedOwner(msg.sender) {
+    if (_vrfCoordinator == address(0)) {
+      revert ZeroAddress();
+    }
+    s_vrfCoordinator = IVRFCoordinatorV2Plus(_vrfCoordinator);
+  }
+```
+
+After Child Contract Inherits:
+```js
+contract Raffle is VRFConsumerBaseV2Plus {
+     uint256 private immutable i_entranceFee; 
+    uint256 private immutable i_interval;
+
+    uint256 private s_lastTimeStamp;
+
+    constructor(uint256 entranceFee, uint256 interval, address vrfCoordinator)
+    // `VRFConsumerBaseV2Plus` is the name of the contract we are inheriting from
+    VRFConsumerBaseV2Plus(vrfCoordinator) // here we are going to define the vrfCoordinator address during this contracts deployment, and this will pass the address to the VRFConsumerBaseV2Plus constructor.
+    
+    {
+        i_entranceFee = entranceFee;
+        i_interval = interval;
+        s_lastTimeStamp = block.timestamp;
+    }
+}
+
+```
+
+### Override Notes
+
+Functions tagged with `virtual` are overrided by functions with the same name but with the `override` keyword.
+
+### Modulo Notes
+
+The ` % ` is called the modulo operation. It's kinda like divison, but it represents the remainder. 
+For example: 
+
+`10` / `2` = `5`                                           Key: ` / ` = divison  
+but 10 % 2 = 0 as there is no remainder                         ` % ` = modulo
+
+10 % 3 = 1 (because 10 divided by 3 leaves a remainder of 1)
+
+20 % 7 = 6 (because the remainder is 6)
+(^ this is read `20 mod 7 equals 6`)
+ 
+
+
+### Sending Money in Solidity Notes
+
+There are three ways to transfer the funds: transfer, send, and call
+
+Transfer (NOT RECOMMENDED):
+```js
+    // transfers balance from this contract's balance to the msg.sender
+    payable(msg.sender).transfer(address(this).balance); //  this is how you use transfer
+    // ^there is an issue with using transfer, as if it uses more than 2,300 gas it will throw and error and revert. (sending tokens from one wallet to another is already 2,100 gas)
+```
+
+Send (NOT RECOMMENDED) :
+```js
+    // we need to use "bool" when using `send` because if the call fails, it will not revert the transaction and the user would not get their money. ("send" also fails at 2,300 gas)
+    bool sendSuccess = payable(msg.sender).send(address(this).balance);
+    // require sendSuccess to be true or it reverts with "Send Failed"
+    require(sendSuccess, "Send failed");
+```
+
+Call (RECOMMENDED) :
+    Using `call` is lower level solidity and is very powerful, is the best one to use most of the time.
+
+    `call` can be used to call almost every function in all of ethereum without having an ABI!
+
+     Using `call` returns a boolean and bytes data. The bytes aren't important in the example below, so we commented it out and left the comma. (but really we would delete it if this was a production contract and we would leave the comma. however if we were calling a function we would keep the bytes data) (bytes objects are arrays which is why we use the memory keyword).
+    
+```js
+        (bool callSuccess, /* bytes memory dataReturned */ ) = payable(msg.sender).call{value: address(this).balance}(
+            "" /*<- this is where we would put info of another function if we were calling another function(but we arent here so we leave it blank) */
+        );
+        //        calls the value to send to the payable(msg.sender)^
+
+        // require callSuccess to be true or it reverts with "Call Failed"
+        require(callSuccess, "Call Failed");
+```
+
+Here is another example for the recommended `Call` to transfer funds:
+```js
+contract Raffle {
+    address payable private s_recentWinner;
+
+    ...
+
+     function fulfillRandomWords(uint256 requestId, uint256[] calldata randomWords) internal override {
+        // randomWords is 0 because we are only calling for 1 Random number from chainlink VRF and the index starts at 0, so this represets the 1 number we called for.
+        uint256 indexOfWinner = randomWords[0] % s_players.length; // this says the number that is randomly generated modulo the amount of players in the raffle
+        //  ^ modulo means the remainder of the division. So if 52(random Number) % 20(amount of people in the raffle), this will equal 12 because 12 is the remainder! So whoever is in the 12th spot will win the raffle. And this is saved into the variable indexOfWinner ^
+
+        // the remainder of the modulo equation will be identified within the s_players array and saved as the recentWinner
+        address payable recentWinner = s_players[indexOfWinner];
+
+        // update the storage variable with the recent winner
+        s_recentWinner = recentWinner;
+
+        // pay the recent winner with the whole amount of the contract. 
+        (bool success,) = s_recentWinner.call{value: address(this).balance}("");
+        // if not success then revert
+        if (!success) {
+            revert Raffle__TransferFailed();
+        }
+    }
+}
+```
+
 
 
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-## Package Installing:
+## Package Installing Notes:
 
 to install packages, run `forge install` with a `--no-commit` at the end.
 for example:
@@ -290,7 +826,7 @@ exmaple:
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-## Remappings in foundry.toml:
+## Remappings in foundry.toml Notes:
 Remappings tell foundry to replace the mapping for imports. 
 for example:
 ```javascript
@@ -300,9 +836,25 @@ for example:
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-## Writing Tests For Smart Contracts
+## Smart Contract Tests Notes
 
-All Smart Contracts must have tests. You need tests before going for a smart contract audit or you will be turned away.
+All Smart Contracts must have tests. You need tests before going for a smart contract audit or you will be turned away. 
+
+
+You can see the test coverage by running:
+ `forge coverage`: shows you how many lines of code have been tested.
+ `forge coverage --report debug`: outputs a coverage report and tells you which lines have not been tested.
+ `forge coverage --report debug > coverage.txt`: creates a coverage report/file named `coverage.txt` and it will have all the output of the terminal command `forge coverage --report debug`.
+
+
+When writing tests, following this order:
+1. Write deploy scripts to use in our tests so we can test the exact same way we are going to deploy these smart contracts
+    - Note these deployment scripts will not work on zkSync. zkSync needs scripts written in Bash (for now)
+2. Then Write tests in this order:
+    3. Local Chain (Foundry's Anvil)
+    4. Forked testnet
+    5. Forked mainnet
+  
 
 THe convention for test files is that all test files should end in `.t.sol`.
 
@@ -371,7 +923,6 @@ you can use `-vv`, `-vvv`, `-vvvv`, `-vvvvv` after at the end of your `forge tes
 `-vv` = console.logs
 `-vvv` = stack traces and console.logs
 `-vvvv` = more detailed stack trace, console.logs and bytes.
-`-vvvvv`=
 
 There are 4 different test types:
 1. Unit: Testing a specific part of our code
@@ -388,9 +939,106 @@ If we need to test a part of our code that is outside of our system(example: pri
 
  you only want to deploy mocks when you are working on a local chain like anvil.
 
+### Testing Events
+
+To test an event, you need to copy and paste the events from the codebase to the test file in order to test them.
+
+Once you have the events in your test file, the logic for testing them is `vm.expectEmit(true/false, true/false, true/false, true/false, contractEmittingEvent)`
+
+These 3 first true/false statements will only be true when there is an indexed parameter, and the 4th one is for any data that is not indexed within the event. For example:
+```js
+contract RaffleTest is Test {
+    ...
+    // we copy and paste the event from the smart contract into our test
+    // as you can see there is only one indexed event and no other data.
+    event RaffleEntered(address indexed player, /* No Data */, /* No Data */, /* No Data */); // events can have up to 3 indexed parameters and other data that is not indexed.
+    ...
+    function setUp() external {
+        ...
+        vm.deal(PLAYER, STARTING_PLAYER_BALANCE);
+    }
+
+  function testEnteringRaffleEmitsEvent() public {
+        // Arrange
+        // next transaction will come from the PLAYER address that we made
+        vm.prank(PLAYER);
+        // Act 
+        // because we have an indexed parameter in slot 1 of the event, it is true. However we have no data in slot 2, 3, and 4  so they are false. `address(raffle) is the contract emitting the event`
+        // we expect the next event to have these parameters.
+        vm.expectEmit(true, false, false, false, address(raffle));
+        // the event that should be expected to be emitted from the next transaction
+        emit RaffleEntered(PLAYER);
+        // Assert
+        // PLAYER makes this transaction of entering the raffle and this should emit the event we are testing for.
+        raffle.enterRaffle{value: entranceFee}();
+    }
 
 
- ### Sending money in tests:
+}
+```
+
+
+### Tests with Custom error notes
+
+When writing a test with a custom error, you need to expect the revert with `vm.expectRevert()` and you need to end it with `.selector` after the custom error.
+
+Example:
+```js
+ function testRaffleEvertsWhenYouDontPayEnough() public {
+        // Arrange
+        vm.prank(PLAYER); // the next transaction will be the PLAYER address that we made
+        // Act / Assert
+        // expect the next transaction to revert with the custom error Raffle__SendMoreToEnterRaffle.
+        vm.expectRevert(Raffle.Raffle__SendMoreToEnterRaffle.selector);
+        // call the Enter Raffle with 0 value (the PLAYER is calling this and we expect it to evert since we are sending 0 value)
+        raffle.enterRaffle();
+    }
+```
+
+If the customr error has parameters, then the custom error needs to be abi.encoded and the parameters need to be apart of the error.
+Example:
+
+`Raffle.sol`:
+```js
+contract Raffle is VRFConsumerBaseV2Plus {
+    error Raffle__UpkeepNotNeeded(uint256 balance, uint256 playerslength, uint256 raffleState);
+}
+```
+`test/Raffle.t.sol`:
+```js
+   function testPerformUpkeepRevertsIfCheckUpkeepIsFalse() public {
+        // Arrange
+        // start the current balance of the raffle contract at 0 
+        uint256 currentBalance = 0;
+        // the raffle has 0 players
+        uint256 numPlayers = 0;
+        // we get the raffle state, which should be open since no one is in the raffle yet
+        Raffle.RaffleState rState = raffle.getRaffleState();
+
+        // the next transaction will be by PLAYER
+        vm.prank(PLAYER);
+        // the player enters the raffle and pays the entrance fee
+        raffle.enterRaffle{value: entranceFee}();
+        // the balance is now updated with the new entrance fee
+        currentBalance = currentBalance + entranceFee;
+        // PLAYER is the one person in the raffle
+        numPlayers = 1;
+
+        // Act / Assert
+        // we expect the next call to fail with the custom error of Raffle__UpkeepNotNeeded
+        vm.expectRevert(
+            abi.encodeWithSelector(Raffle.Raffle__UpkeepNotNeeded.selector, currentBalance, numPlayers, rState)
+        );
+        raffle.performUpkeep("");
+    }
+```
+
+
+
+
+
+
+ ### Sending money in tests Notes:
  When writing a test in solidity and you want to pass money to the test, you write it like this:
  ```javascript
   function testFundUpdatesFundedDataStructure() public {
@@ -399,10 +1047,26 @@ If we need to test a part of our code that is outside of our system(example: pri
  ```
  because the fund function that we are calling does not take any parameter, it should be written like `fundMe.fund{value: 10e18}();` and not like ``fundMe.fund({value: 10e18});``. This is because the fund function does not take any parameters but is payable. So {value: 10e18} is the value being passed while () is the parameters being passed. IF the fund function was written like `function fund(uint256 value) public payable {}` then the test line of `fundMe.fund({value: 10e18}); ` would indeed work.
 
- ### GAS INFO IN TESTS
+ ### GAS INFO IN TESTS Notes
  When working on tests in anvil, the gas price defaults to 0. So for us to simulate transactions in test with actual gas prices, we need to tell our tests to actually use real gas prices. This is where `vm.txGasPrice` comes in. (See `vm.txGasPrice` below in cheatcodes for tests)
 
- ### CHEATCODES FOR TESTS
+ ### FUZZ TESTING NOTES
+
+ For most of your testing, ideally you do most of your tests as fuzz tests. You should always try to default all of your tests to some type of fuzz testing.
+
+ Stateless fuzz testing:
+
+ Stateful fuzz testing:
+
+Fuzz testing gets defaulted to 256 runs. To change the amount of tests foundry does in a fuzz test, in your `foundry.toml` change the runs number:
+```js
+[fuzz]
+runs = 256 // change this number
+```
+You can learn more about fuzzing (and foundry.toml commands in general) at` https://github.com/foundry-rs/foundry/tree/master/config ` and scroll down to the fuzz section.
+
+
+ ### CHEATCODES FOR TESTS Notes
  `makeAddr()` : This cheatcode creates a fake address for a fake person for testing Purposes.
  For example:
  ```javascript
@@ -457,6 +1121,7 @@ function setup() public {
             hoax(address(i), SEND_VALUE); // hoax is vm.deal and vm.prank combined.
             fundMe.fund{value: SEND_VALUE}();
         }
+ }
  ```
 As you can see from the example, `hoax` dealt money to the accounts in the loop and made it so that the next transactions would be from the accounts in the loop.
 
@@ -490,8 +1155,17 @@ function ...
         // now when we run this test it will tell us how much gas was used.
 ...
 ```
+
+`vm.warp` & `vm.roll`:
+`vm.warp`: allows us to warp time ahead so that foundry knows time has passed.
+`vm.roll`: rolls the blockchain forward to the block that you assign.
+These don't have do be used together, but they should be used together to avoid issues and be technically correct.
+Example:
+```js
+
+```
  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
- ## Chisel
+ ## Chisel Notes
 
  To run chisel, run `chisel` in your terminal.
  you can run `!help` in chisel to see everything you can do in the chisel terminal.
@@ -545,9 +1219,9 @@ in the exmaple above, we are deploying to anvil's blockchain with a fake private
 
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-## Scripts
+## Script Notes
 
-### Getting Started with Scripts
+### Getting Started with Scripts Notes
 
 When writing Scripts, you must import the script directory from foundry. and if you are using console.log, then you must import console.log as well.
 For Example:
@@ -594,7 +1268,162 @@ contract DeployFundMe is Script {
 }
 ```
 
-### Deploying A Script
+another example: DeployRaffle.s.sol from foundry-smart-contract-lottery
+```js
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.19;
+
+import {Script} from "forge-std/Script.sol";
+import {Raffle} from "../src/Raffle.sol";
+import {HelperConfig} from "./HelperConfig.s.sol";
+
+contract DeployRaffle is Script {
+    function run() public {}
+
+    function deployContracts() public returns (Raffle, HelperConfig) {
+        // deploy a new helpconfig contract that grabs the chainid and networkConfigs
+        HelperConfig helperConfig = new HelperConfig();
+        // grab the network configs of the chain we are deploying to and save them as `config`.
+        // its also the same as doing ` HelperConfig.NetworkConfig memory config = helperConfig.getConfigByChainId(block.chainid);`
+        HelperConfig.NetworkConfig memory config = helperConfig.getConfig();
+
+        // everything between startBroadcast and stopBroadcast is broadcasted to a real chain
+        vm.startBroadcast();
+        // create a new raffle contract with the parameters that are in the Raffle's constructor. This HAVE to be in the same order as the constructor!
+        Raffle raffle = new Raffle(
+            // we do `config.` before each one because our helperConfig contract grabs the correct config dependent on the chain we are deploying to
+            config.entranceFee,
+            config.interval,
+            config.vrfCoordinator,
+            config.gasLane,
+            config.subscriptionId,
+            config.callBackGasLimit
+        );
+        vm.stopBroadcast();
+        // returns the new raffle and helperconfig that we just defined and deployed so that these new values can be used when this function `deployContracts` is called
+        return (raffle, helperConfig);
+    }
+}
+
+```
+
+### HelperConfig Script Notes
+
+We live in a multi-chain world, there are many different chains and often we will want to deploy the same protocol to different chains. To do this smoothly, we can create a `HelperConfig.s.sol` file that can see what chain we are on, and grab the correct network configurations for our deployment script when we are deploying.
+
+For example: HelperConfig.s.sol from foundry-smart-contract-lottery-f23
+```js
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.19;
+
+import {Script} from "forge-std/Script.sol";
+import {Raffle} from "../src/Raffle.sol";
+import {VRFCoordinatorV2_5Mock} from
+    "../lib/chainlink-brownie-contracts/contracts/src/v0.8/vrf/mocks/VRFCoordinatorV2_5Mock.sol";
+
+abstract contract CodeConstants {
+    /* VRF Mock Values */
+    // values that are from chainlinks mock constructor
+    uint96 public MOCK_BASE_FEE = 0.25 ether; // when we work with chainlink VRF we need to pay a certain amount of link token. The base fee is the flat value we are always going to pay
+    uint96 public MOCK_GAS_PRICE_LINK = 1e19; // when the vrf responds, it needs gas, so this is the cost of the gas that we spend to cover for it. This calculation is how much link per eth are we going to use?
+    int256 public MOCK_WEI_PER_UNIT_LINK = 4_16; // link to eth price in wei
+    // ^ these are just fake values for anvil ^
+
+    // chainId for Sepolia
+    uint256 public constant ETH_SEPOLIA_CHAIN_ID = 11155111;
+    // chainId for anvil
+    uint256 public constant LOCAL_CHAIN_ID = 31337;
+}
+
+contract HelperConfig is CodeConstants, Script {
+    error HelperConfig__InvalidChainID();
+
+    // these are the items that the constructor in DeployRaffle.s.sol takes
+    struct NetworkConfig {
+        uint256 entranceFee;
+        uint256 interval;
+        address vrfCoordinator;
+        bytes32 gasLane;
+        uint32 callBackGasLimit;
+        uint256 subscriptionId;
+    }
+
+    // creating a variable named localNetworkConfig of type struct NetworkConfig
+    NetworkConfig public localNetworkConfig;
+
+    // mapping a chainId to the struct NetworkConfig so that each chainId has its own set of NetworkConfig variables.
+    mapping(uint256 chainId => NetworkConfig) public networkConfigs;
+
+    constructor() {
+        // mapping the chainId 11155111 to the values in getSepoliaEthConfig
+        networkConfigs[ETH_SEPOLIA_CHAIN_ID] = getSepoliaEthConfig();
+    }
+
+    function getConfigByChainId(uint256 chainId) public returns (NetworkConfig memory) {
+        // if the if the vrf.coordinator address does exist on the chain we are on,
+        if (networkConfigs[chainId].vrfCoordinator != address(0)) {
+            // then return the all the values in the NetworkConfig struct
+            return networkConfigs[chainId];
+            // if we are on the local chain, return the getOrCreateAnvilEthConfig() function
+        } else if (chainId == LOCAL_CHAIN_ID) {
+            return getOrCreateAnvilEthConfig();
+            // otherwise revert with an error
+        } else {
+            revert HelperConfig__InvalidChainID();
+        }
+    }
+
+    // calls getConfigByChainId to grab the chainId of the chain we are deployed on and do the logic in getConfigByChainId
+    function getConfig() public returns (NetworkConfig memory) {
+        return getConfigByChainId(block.chainid);
+    }
+
+    // these are the items that are relevant for our raffle constructor if we are on the Sepolia Chain when we deploy.
+    function getSepoliaEthConfig() public pure returns (NetworkConfig memory) {
+        return NetworkConfig({
+            entranceFee: 0.1 ether, // 1e16 // 16 zeros
+            interval: 30, // 30 seconds
+            vrfCoordinator: 0x9DdfaCa8183c41ad55329BdeeD9F6A8d53168B1B, // got this from the chainlink docs here: https://docs.chain.link/vrf/v2-5/supported-networks
+            gasLane: 0x787d74caea10b2b357790d5b5247c2f63d1d91572a9846f780606e4d953677ae, // // got this keyhash from the chainlink docs here: https://docs.chain.link/vrf/v2-5/supported-networks
+            callBackGasLimit: 500000, // 500,000 gas
+            subscriptionId: 0
+        });
+    }
+
+    function getOrCreateAnvilEthConfig() public returns (NetworkConfig memory) {
+        // if the if the vrf.coordinator address does exist on the anvil chain that we are on,
+        if (localNetworkConfig.vrfCoordinator != address(0)) {
+            // then return the all the values in the NetworkConfig struct that is has since it already exists
+            return localNetworkConfig;
+        }
+
+        // if the if the vrf.coordinator address does NOT exist on the anvil chain that we are on, then deploy a mock vrf.coordinator
+        vm.startBroadcast();
+        VRFCoordinatorV2_5Mock vrfCoordinatorMock =
+            new VRFCoordinatorV2_5Mock(MOCK_BASE_FEE, MOCK_GAS_PRICE_LINK, MOCK_WEI_PER_UNIT_LINK);
+        vm.stopBroadcast();
+
+        // these are the items that are relevant for our raffle constructor if we are on the Anvil Chain when we deploy.
+        localNetworkConfig = NetworkConfig({
+            entranceFee: 0.1 ether, // 1e16 // 16 zeros
+            interval: 30, // 30 seconds
+            vrfCoordinator: address(vrfCoordinatorMock), // the address of the vrfCoordinatorMock
+            gasLane: 0x787d74caea10b2b357790d5b5247c2f63d1d91572a9846f780606e4d953677ae, // does not matter since this is on anvil
+            callBackGasLimit: 500000, // 500,000 gas, but it does not matter since this is on anvil
+            subscriptionId: 0
+        });
+        // then return the all the values in the NetworkConfig struct when this function is called
+        return localNetworkConfig;
+    }
+}
+```
+
+
+
+
+
+
+### Deploying A Script Notes
 If you have a script, you can run a simulation of deploying to a blockchain with the command in your terminal of `forge script script/<file-name> --rpc-url http://<endpoint-url>` 
 
 example:
@@ -619,7 +1448,7 @@ example:
 *** NEVER USE A .ENV FOR PRODUCTION BUILDS, ONLY USE A .ENV FOR TESTING ***
 
 
-### Interaction Scripts
+### Interaction Script Notes
 (its most likely easier to just use Cast Send to interact with deployed contracts.)
 
 You can write a script to interact with your deployed contract. This way, if you want to repeatedly call a function of interact with your contract for any reason, a script is a great way to do so as it makes these interactions reproducible. These interaction scripts should be saved in the script/Interactions folder!
@@ -659,7 +1488,7 @@ Always write tests for scripts as getting them wrong and deploying them is a was
 
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-## BroadCast Folder:
+## BroadCast Folder Notes:
 
 the `dry-run` folder is where the transactions with no blockchain specified go.
 
@@ -718,7 +1547,7 @@ example:
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-## DEPLOYING PRODUCTION CONTRACTS
+## DEPLOYING PRODUCTION CONTRACT Notes
 
 
 *** DEPLOYING PRODUCTION CONTRACTS ***
@@ -744,7 +1573,7 @@ after encrypting your private key clear your terminal's history with `history -c
 
 After deploying a contract copy the hash and input it into its blockchain's etherscan, then click on the "to" as this will be the contract. (The hash created is the hash of the transaction and the "to" is the contract itself.)
 
-### Verifying a Deploying Contract:
+### Verifying a Deploying Contract Notes:
 
 Manually (Not Recommended):
 1. When on the contract on etherscan, click the "Verify and Publish" button in the "Contract" tab of the contract on etherscan. This will take you to a different page on etherscan.
@@ -764,7 +1593,7 @@ Example:
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-## How to interact with deployed contracts from the command line:
+## How to interact with deployed contracts from the command line Notes:
 
 After you deploy a contract, you can interact with it:
 
@@ -797,6 +1626,18 @@ example: the hex data returned is: `0x000000000000000000000000000000000000000000
 
 This returns the data that we submitted of `123`. (NOTE: This returns the data we submitted because it is the only data submitted and the contract function "retrieve" is written to return the most recent number.)
 
+### CAST SIG NOTES
+
+When interacting with a contract on the internet from metamask, metamask will prompt you with a confirm transaction. In this confirm window on metamask, it will tell you what function you are calling at the top of the window and there will be a `HEX DATA: 4 BYTES` section at the bottom of the window that has the function selector hex data of the function you are calling.
+
+In your terminal, if you run `cast sig "<function-Name>()" ` and it will return the hex data so we can make sure it is the same hex data as the function we are calling in our transaction to make sure it is calling the correct function and we are not getting scammed.
+Example:
+```js
+/* (Command): */ cast sig "createSubscription()"
+/* (Terminal returns): */ 0xa21a23e4
+```
+
+Sometimes you will not know what the function's hex is. But there are function signature databases that we can use (like `openChain.xyz` and we go to signature database). If you paste in the function selector/ hex data and press search, it has a database of different hashes/hex data and the name of the function associated with it. So this way we can see what hex data is associated with what functions. These databases only work if someone actually updates them. Foundry has a way to automatically update these databases (Check foundry docs).
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -846,7 +1687,512 @@ For example:
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-## MAKEFILE
+## ChainLink Notes:
+
+### Aggregator PriceFeeds Notes
+To Be filled out...
+
+
+### Chainlink VRF 2.5 Notes
+Help: https://updraft.cyfrin.io/courses/foundry/smart-contract-lottery/implementing-chainlink-vrf
+
+The Chainlink VRF(Verifiable Random Function) is a way to generate a random number. Currently, chainlink has 2 ways of using this VRF, the `V2 Subscription Method` and `V2 Direct Funding Method`. The better option to use is `V2 Subscription Method` because it is much more scable. 
+`V2 Subscription Method`: Fund the subscription and apply that to as many raffles/contracts/items as we want.
+`V2 Direct Funding Method`: Everytime we deploy a new raffle/contract/item we would have to refund it. 
+
+This section will be covering the ``V2 Subscription Method`` as it is better.
+
+Getting a Random Number through Chainlink VRF is a 2-step process.
+1. Request RNG (Random Number Generator) - We call the request in a transaction that we send
+2. Get RNG (Random Number Generated) - Then the chainlink node is going to give us the random number in a transaction that it sends. It sends it in the callback function(a function that chainlink VRF calls back to.) 
+
+Steps:
+1. In the link `https://docs.chain.link/vrf/v2-5/getting-started` you will find a `Open in Remix Button`, click that to see the full code.
+2. In `function rollDice` we can see the function calling Chainlink VRF for the RNG.
+```javascript
+  function rollDice(
+        address roller
+    ) public onlyOwner returns (uint256 requestId) {
+        require(s_results[roller] == 0, "Already rolled");
+        // Will revert if subscription is not set and funded.
+        // this is the section we want, copy from here ->
+        requestId = s_vrfCoordinator.requestRandomWords(
+            VRFV2PlusClient.RandomWordsRequest({
+                keyHash: s_keyHash,
+                subId: s_subscriptionId,
+                requestConfirmations: requestConfirmations,
+                callbackGasLimit: callbackGasLimit,
+                numWords: numWords,
+                extraArgs: VRFV2PlusClient._argsToBytes(
+                    // Set nativePayment to true to pay for VRF requests with Sepolia ETH instead of LINK
+                    VRFV2PlusClient.ExtraArgsV1({nativePayment: false})
+                )
+            })
+        ); // <- this is the section we want, copy to here
+
+        s_rollers[requestId] = roller;
+        s_results[roller] = ROLL_IN_PROGRESS;
+        emit DiceRolled(requestId, roller);
+    }
+```
+3. Copy and Paste this section(step 2) that we want into your code where you want to get a random number. Also copy the beginning of `function fulfillRandomWords`.
+```js
+    function fulfillRandomWords(uint256 requestId, uint256[] calldata randomWords) internal override {}
+```
+
+4. This code will not work at first.  we need to import the chainlink contracts. Run `forge install smartcontractkit/chainlink-brownie-contracts@1.1.1 --no-commit`.
+5. In the Remix Example, copy and paste the `VRFConsumerBaseV2Plus` import.
+```javascript
+import {VRFConsumerBaseV2Plus} from "@chainlink/contracts/src/v0.8/vrf/dev/VRFConsumerBaseV2Plus.sol"; // remove the version number from the import. Originally it has a @1.1.1 but thats only for remix
+```
+6. In the `foundry.toml` of your project, put an remapping in of:
+```js
+remappings = ['@chainlink/contracts/=lib/chainlink-brownie-contracts/contracts']
+```
+7. Make sure your contract inherits from the import:
+```js
+contract Raffle is VRFConsumerBaseV2Plus {}
+```
+8. Update your constructor to inherit from Chainlink's VRF constructor.
+Example:
+
+Before Inheritance:
+```js
+contract Raffle {
+
+    uint256 private immutable i_entranceFee; 
+    uint256 private immutable i_interval;
+
+    uint256 private s_lastTimeStamp;
+
+    constructor(uint256 entranceFee, uint256 interval) {
+        i_entranceFee = entranceFee;
+        i_interval = interval;
+        s_lastTimeStamp = block.timestamp;
+    }
+}
+
+```
+
+
+Chainlink VRF V2.5's constructor:
+```js
+abstract contract VRFConsumerBaseV2Plus is IVRFMigratableConsumerV2Plus, ConfirmedOwner {
+  error OnlyCoordinatorCanFulfill(address have, address want);
+  error OnlyOwnerOrCoordinator(address have, address owner, address coordinator);
+  error ZeroAddress();
+
+  // s_vrfCoordinator should be used by consumers to make requests to vrfCoordinator
+  // so that coordinator reference is updated after migration
+  IVRFCoordinatorV2Plus public s_vrfCoordinator;
+
+  /**
+   * @param _vrfCoordinator address of VRFCoordinator contract
+   */
+  constructor(address _vrfCoordinator) ConfirmedOwner(msg.sender) {
+    if (_vrfCoordinator == address(0)) {
+      revert ZeroAddress();
+    }
+    s_vrfCoordinator = IVRFCoordinatorV2Plus(_vrfCoordinator);
+  }
+```
+
+After Child Contract Inherits:
+```js
+contract Raffle is VRFConsumerBaseV2Plus {
+     uint256 private immutable i_entranceFee; 
+    uint256 private immutable i_interval;
+
+    uint256 private s_lastTimeStamp;
+
+    constructor(uint256 entranceFee, uint256 interval, address vrfCoordinator) 
+    // `VRFConsumerBaseV2Plus` is the name of the contract we are inheriting from
+    VRFConsumerBaseV2Plus(vrfCoordinator) // here we are going to define the vrfCoordinator address during this contracts deployment, and this will pass the address to the VRFConsumerBaseV2Plus constructor.
+    
+    {
+        i_entranceFee = entranceFee;
+        i_interval = interval;
+        s_lastTimeStamp = block.timestamp;
+    }
+}
+
+```
+
+9. Import `VRFV2PlusClient` into your file as this is a file that the VRF needs. (import but do NOT inherit)
+```js
+import {VRFV2PlusClient} from
+    "../lib/chainlink-brownie-contracts/contracts/src/v0.8/vrf/dev/libraries/VRFV2PlusClient.sol";
+```
+
+10. After doing everything above. we need to fill out the data in the pasted section that we copied from chainlink in step 2/3. You can read the comments here or read from the Chainlink docs to find out what the variables in example function `pickWinner` do. (https://docs.chain.link/vrf/v2-5/getting-started)
+```js
+contract Raffle is VRFConsumerBaseV2Plus {
+
+// this is a uint16 because it will be a very small number and will never change.
+    uint16 private constant REQUEST_CONFIRMATIONS = 3; // // how many blocks the VRF should wait before sending us the random number
+
+    uint32 private constant NUM_WORDS = 1; // the number of random numbers that we want
+
+    // this is being declared to identify its type of uint256. this will be how much it costs to enter the raffle. it is being initialized in the constructor and will be set when the contract is deployed through the deployment script.
+    uint256 private immutable i_entranceFee; // we made this private to save gas. because it is private we need a getter function for it
+
+    // this variable is declared to set the interval of how long each raffle will be. it is being initialized in the constructor and will be set when the contract is deployed through the deployment script.
+    // @dev the duration of the lottery in seconds.
+    uint256 private immutable i_interval;
+    // the amount of gas we are willing to send for the chainlink VRF
+    bytes32 private immutable i_keyHash;
+    // kinda linke the serial number for the request to Chainlink VRF
+    uint256 private immutable i_subscriptionId;
+    // Max amount of gas you are willing to spend when the VRF sends the RNG back to you
+    uint32 private immutable i_callbackGasLimit;
+
+    constructor(
+        uint256 entranceFee,
+        uint256 interval,
+        address vrfCoordinator,
+        bytes32 gasLane,
+        uint256 subscriptionId,
+        uint32 callbackGasLimit
+    ) VRFConsumerBaseV2Plus(vrfCoordinator) {
+        // entranceFee gets set in the deployment script(when the contract is being deployed).
+        i_entranceFee = entranceFee;
+        // interval gets set in the deployment script(when the contract is being deployed).
+        i_interval = interval;
+        // sets the s_lastTimeStamp variable to the current block.timestamp when deployed.
+        s_lastTimeStamp = block.timestamp;
+        // keyHash to chainlink means the amount of max gas we are willing to pay. So we named it gasLane because we like gasLane as the name more
+        i_keyHash = gasLane;
+        // sets i_subscriptionId equal to the one set at deployment
+        i_subscriptionId = subscriptionId;
+
+        // Max amount of gas you are willing to spend when the VRF sends the RNG back to you
+        i_callbackGasLimit = callbackGasLimit;
+    }
+
+    function pickWinner() external {
+        // this checks to see if enough time has passed
+        if ((block.timestamp - s_lastTimeStamp) < i_interval) {
+            revert();
+        }
+        // calling to Chainlink VRF to get a randomNumber
+        uint256 requestId = s_vrfCoordinator.requestRandomWords(
+            VRFV2PlusClient.RandomWordsRequest({
+                keyHash: i_keyHash, // how much gas you are willing to pay
+                subId: i_subscriptionId, // kinda of like a serial number for the request
+                requestConfirmations: REQUEST_CONFIRMATIONS, // how many blocks the VRF should wait before sending us the random number
+                callbackGasLimit: i_callbackGasLimit, // Max amount of gas you are willing to spend when the VRF sends the RNG back to you
+                numWords: NUM_WORDS, // the number of random numbers that we want
+                extraArgs: VRFV2PlusClient._argsToBytes(
+                    // Set nativePayment to true to pay for VRF requests with Sepolia ETH instead of LINK
+                    VRFV2PlusClient.ExtraArgsV1({nativePayment: false})
+                )
+            })
+        );
+    }
+
+    function fulfillRandomWords(uint256 requestId, uint256[] calldata randomWords) internal override {}
+}
+```
+
+11. After you have done all the steps above, you need to get a subscription ID. This way only you will have access to your subscription ID and no one else can use it.
+
+To do this you need to Create the Subscription, Fund the subscription, then add a consumer.
+
+Creating the Subscription:
+example (from: `foundry-smart-contract-lottery-f23/Interactions.s.sol`):
+```js 
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.19;
+
+import {Script, console} from "forge-std/Script.sol";
+import {HelperConfig, CodeConstants} from "./HelperConfig.s.sol";
+import {VRFCoordinatorV2_5Mock} from
+    "../lib/chainlink-brownie-contracts/contracts/src/v0.8/vrf/mocks/VRFCoordinatorV2_5Mock.sol";
+import {LinkToken} from "../test/mocks/LinkToken.sol";
+import {DevOpsTools} from "foundry-devops/src/DevOpsTools.sol";
+
+// to use chainLink VRF, we need to create a subscription so that we are the only ones that can call our vrf.
+// this is how you do it programically.
+
+// we made this interactions file because it makes our codebase more modular and if we want to create more subscriptions in the future, we can do it right from the command line
+
+contract CreateSubscription is Script {
+    function createSubscriptionUsingConfig() public returns (uint256, address) {
+        // deploys a new helperConfig contract so we can interact with it
+        HelperConfig helperConfig = new HelperConfig();
+        // calls `getConfig` function from HelperConfig contract, this returns the networkConfigs struct, by but doing `getConfig().vrfCoordinator` it only grabs the vrfCoordinator from the struct. Then we save it as a variable named vrfCoordinator in this contract
+        address vrfCoordinator = helperConfig.getConfig().vrfCoordinator;
+        // runs the createSubscription with the `vrfCoordinator` that we just saved as the parameter address and saves the return values of subId.
+        (uint256 subId,) = createSubscription(vrfCoordinator);
+
+        return (subId, vrfCoordinator);
+    }
+
+    // created another function so that it can be even more modular
+    function createSubscription(address vrfCoordinator) public returns (uint256, address) {
+        console.log("Creating Subscription on chain Id:", block.chainid);
+        // everything between startBroadcast and stopBroadcast will be broadcasted to the blockchain.
+        vm.startBroadcast();
+        // VRFCoordinatorV2_5Mock inherits from SubscriptionAPI.sol where the createSubscription lives
+        // calls the VRFCoordinatorV2_5Mock contract with the vrfCoordinator as the input parameter and calls the createSubscription function within the VRFCoordinatorV2_5Mock contract.
+        uint256 subId = VRFCoordinatorV2_5Mock(vrfCoordinator).createSubscription();
+        vm.stopBroadcast();
+
+        console.log("Your subscription Id is: ", subId);
+        console.log("Please update the subscription Id in your HelperConfig.s.sol");
+
+        return (subId, vrfCoordinator);
+    }
+
+    function run() public {
+        createSubscriptionUsingConfig();
+    }
+}
+```
+
+Funding the Subscription:
+example (from `foundry-smart-contract-lottery-f23/Interactions.s.sol`):
+```js
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.19;
+
+import {Script, console} from "forge-std/Script.sol";
+import {HelperConfig, CodeConstants} from "./HelperConfig.s.sol";
+import {VRFCoordinatorV2_5Mock} from
+    "../lib/chainlink-brownie-contracts/contracts/src/v0.8/vrf/mocks/VRFCoordinatorV2_5Mock.sol";
+import {LinkToken} from "../test/mocks/LinkToken.sol";
+import {DevOpsTools} from "foundry-devops/src/DevOpsTools.sol";
+
+
+contract FundSubscription is Script, CodeConstants {
+    // this says ether, but it really is (chain)LINK, since there are 18 decimals in the (CHAIN)LINK token as well
+    uint256 public constant FUND_AMOUNT = 3 ether;
+
+    function fundSubscriptionUsingConfig() public {
+        // deploys a new helperConfig contract so we can interact with it
+        HelperConfig helperConfig = new HelperConfig();
+        // calls `getConfig` function from HelperConfig contract, this returns the networkConfigs struct, by but doing `getConfig().vrfCoordinator` it only grabs the vrfCoordinator from the struct. Then we save it as a variable named vrfCoordinator in this contract
+        address vrfCoordinator = helperConfig.getConfig().vrfCoordinator;
+        // in our DeployRaffle, we are updating the subscriptionId with the new subscription id we are generating. Here, we call the subscriptionId that we are updating the network configs with(in the deployment script).
+        uint256 subscriptionId = helperConfig.getConfig().subscriptionId;
+        // calls the getConfig function from helperConfig and gets the link address and saves it as a variable named linkToken
+        address linkToken = helperConfig.getConfig().link;
+        // runs `fundSubscription` function (below) and inputs the following parameters (we just defined these variables in this function)
+        fundSubscription(vrfCoordinator, subscriptionId, linkToken);
+    }
+
+    function fundSubscription(address vrfCoordinator, uint256 subscriptionId, address linkToken) public {
+        console.log("Funding subscription: ", subscriptionId);
+        console.log("Using vrfCoordinator: ", vrfCoordinator);
+        console.log("On Chain: ", block.chainid);
+
+        // if we are on Anvil (local fake blockchain) then deploy a mock and pass it our vrfCoordinator address
+        if (block.chainid == LOCAL_CHAIN_ID) {
+            // everything between startBroadcast and stopBroadcast will be broadcasted to the blockchain.
+            vm.startBroadcast();
+            // call the fundSubscription function with the subscriptionId and the value amount. This
+            VRFCoordinatorV2_5Mock(vrfCoordinator).fundSubscription(subscriptionId, FUND_AMOUNT);
+            vm.stopBroadcast();
+        } else {
+            // everything between startBroadcast and stopBroadcast will be broadcasted to the blockchain.
+            vm.startBroadcast();
+            // otherwise, if we are on a real blockchain call `transferAndCall` function from the link token contract and pass the vrfCoordinator address, the value amount we are funding it with and encode our subscriptionID so no one else sees it.
+            LinkToken(linkToken).transferAndCall(vrfCoordinator, FUND_AMOUNT, abi.encode(subscriptionId));
+            vm.stopBroadcast();
+        }
+    }
+
+    function run() public {
+        fundSubscriptionUsingConfig();
+    }
+}
+```
+
+Adding Consumer:
+First install foundry devops with `forge install Cyfrin/foundry-devops --no-commit` (or whatever the installtion says in https://github.com/Cyfrin/foundry-devops ).
+
+Then we need to update the `foundry.toml` file to have read permissions on the broadcast folder.
+example (from `foundry-smart-contract-lottery-f23/foundry.toml`):
+```js
+contract AddConsumer is Script {
+    function addConsumerUsingConfig(address mostRecentlyDeployed) public {
+        // deploys a new helperConfig contract so we can interact with it
+        HelperConfig helperConfig = new HelperConfig();
+        // calls for the `subscriptionId` from the networkConfigs struct that getConfig returns from the HelperConfig contract
+        uint256 subId = helperConfig.getConfig().subscriptionId;
+        // calls for the `vrfCoordinator` from the networkConfigs struct that getConfig returns from the HelperConfig contract
+        address vrfCoordinator = helperConfig.getConfig().vrfCoordinator;
+        // calls `addConsumer` and passes the mostRecentlyDeployed, vrfCoordinator, subId as parameters. we just identified `vrfCoordinator` and `subId`. `mostRecentlyDeployed` get passed in when the run function is called.
+        addConsumer(mostRecentlyDeployed, vrfCoordinator, subId);
+    }
+
+    function addConsumer(address contractToAddToVrf, address vrfCoordinator, uint256 subId) public {
+        console.log("Adding consumer contract: ", contractToAddToVrf);
+        console.log("To vrfCoordinator: ", vrfCoordinator);
+        console.log("On ChainId: ", block.chainid);
+        // everything between startBroadcast and stopBroadcast will be broadcasted to the blockchain.
+        vm.startBroadcast();
+        // calls `addConsumer` from the `VRFCoordinatorV2_5Mock` and it takes the parameters of the subId and consumer (so we pass the subId and contractToAddToVrf.)
+        VRFCoordinatorV2_5Mock(vrfCoordinator).addConsumer(subId, contractToAddToVrf);
+        vm.stopBroadcast();
+    }
+
+    function run() external {
+        // calls the `get_most_recent_deployment` function from the DevOpsTools library in order to get the most recently deployed version of our Raffle smart contract.
+        address mostRecentlyDeployed = DevOpsTools.get_most_recent_deployment("Raffle", block.chainid);
+        // calls the `addConsumerUsingConfig` and passed the most recently deployed raffle contract as its parameter.
+        addConsumerUsingConfig(mostRecentlyDeployed);
+    }
+}
+```
+
+12. Then we need to add the CreateSubscription, FundSubscription and AddConsumer contracts and functions to our deploy script.
+example (from DeployRaffle.s.sol):
+```js
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.19;
+
+import {Script} from "forge-std/Script.sol";
+import {Raffle} from "../src/Raffle.sol";
+import {HelperConfig} from "./HelperConfig.s.sol";
+import {CreateSubscription, FundSubscription, AddConsumer} from "./Interactions.s.sol";
+
+contract DeployRaffle is Script {
+    function run() public {
+        deployContract();
+    }
+
+    function deployContract() public returns (Raffle, HelperConfig) {
+        // deploy a new helpconfig contract that grabs the chainid and networkConfigs
+        HelperConfig helperConfig = new HelperConfig();
+        // grab the network configs of the chain we are deploying to and save them as `config`.
+        // its also the same as doing ` HelperConfig.NetworkConfig memory config = helperConfig.getConfigByChainId(block.chainid);`
+        HelperConfig.NetworkConfig memory config = helperConfig.getConfig();
+
+        // if the subscription id does not exist, create one
+        if (config.subscriptionId == 0) {
+            // deploys a new CreateSubscription contract from Interactions.s.sol and save it as a variable named createSubscription
+            CreateSubscription createSubscription = new CreateSubscription();
+            // calls the createSubscription contract's createSubscription function and passes the vrfCoordinator from the networkConfigs dependent on the chain we are on. This will create a subscription for our vrfCoordinator. Then we save the return values of the subscriptionId and vrfCoordinator and vrfCoordinator as the subscriptionId and values in our networkConfig.
+            (config.subscriptionId, config.vrfCoordinator) =
+                createSubscription.createSubscription(config.vrfCoordinator);
+
+            // creates and deploys a new FundSubscription contract from the Interactions.s.sol file.
+            FundSubscription fundSubscription = new FundSubscription();
+            // calls the `fundSubscription` function from the FundSubscription contract we just created and pass the parameters that it takes.
+            fundSubscription.fundSubscription(config.vrfCoordinator, config.subscriptionId, config.link);
+        }
+
+        // everything between startBroadcast and stopBroadcast is broadcasted to a real chain
+        vm.startBroadcast();
+        // create a new raffle contract with the parameters that are in the Raffle's constructor. This HAVE to be in the same order as the constructor!
+        Raffle raffle = new Raffle(
+            // we do `config.` before each one because our helperConfig contract grabs the correct config dependent on the chain we are deploying to
+            config.entranceFee,
+            config.interval,
+            config.vrfCoordinator,
+            config.gasLane,
+            config.subscriptionId,
+            config.callBackGasLimit
+        );
+        vm.stopBroadcast();
+
+        // creates and deploys a new AddConsumer contract from the Interactions.s.sol file.
+        AddConsumer addConsumer = new AddConsumer();
+        // calls the `addConsumer` function from the `AddConsumer` contract we just created/deplyed and pass the parameters that it takes.
+        addConsumer.addConsumer(address(raffle), config.vrfCoordinator, config.subscriptionId);
+
+        // returns the new raffle and helperconfig that we just defined and deployed so that these new values can be used when this function `deployContracts` is called
+        return (raffle, helperConfig);
+    }
+}
+
+```
+
+
+### Chainlink Automation (Custom Logic) Notes 
+
+Chainlink Automation (formerly called Keeper Network) is a decentralized service that enables the automatic execution of smart contracts and other blockchain tasks when specific conditions are met. Think of it as a highly reliable, blockchain-native scheduling system. It can call any functions for you whenever you want.
+
+help: `https://updraft.cyfrin.io/courses/foundry/smart-contract-lottery/chainlink-automation` & `https://updraft.cyfrin.io/courses/foundry/smart-contract-lottery/implementing-automation-2`
+
+Steps:
+1. In `https://docs.chain.link/chainlink-automation/guides/compatible-contracts` click on the "Open in Remix" button. Here you will see the the AutomationCounter example, as you can see, you need a checkUpkeep function and a performUpkeep function.
+
+2. You will need to create a `checkUpkeep` and `performUpkeep` function. 
+The `checkUpkeep` function will be called indefinitely by the chain link nodes until the Boolean in the return function of the `checkUpkeep` function returns true. Once it returns true it will trigger `performUpkeep`. The `checkUpkeep` function is the function that has all the requirements that are needed to be true in order to perform the automated task and the automated task that you want is in and performed in `performUpkeep`
+Example:
+```js
+ /**
+     * @dev this is the function that the chainlink nodes will call to see
+     * if the lottery is ready to have a winner picked.
+     * The following should be true in order for upkeepNeeded to be true:
+     * 1. The time inteval has passes between raffle runs
+     * 2. the lottery is open.
+     * 3. The contract has ETH(has players)
+     * 4. Implicitly, your subscription has LINK
+     * @param - ignored
+     * @return upkeepNeeded - true if it's time to restart the lottery
+     */
+    // checkData being commented out means that it is not being used anywhere in the function but it can be used if we want.
+    function checkUpkeep(bytes memory /* checkData */ )
+        public
+        view
+        returns (
+            // variables defined in return function are already initialized. bool upkeepNeeded starts as false until updated otherwise.
+            bool upkeepNeeded,
+            bytes memory /* performData */
+        )
+    {
+        // this checks to see if enough time has passed
+        bool timHasPassed = ((block.timestamp - s_lastTimeStamp) >= i_interval);
+        // the state of the raffle changes to open so players can join again.
+        bool isOpen = s_raffleState == RaffleState.OPEN;
+        // checks that this raffle contract has some money in it
+        bool hasBalance = address(this).balance > 0;
+        // checks there is at least 1 player
+        bool hasPlayers = s_players.length > 0;
+        // if all the above booleans are true, then upkeepNeeded will be set to true as well.
+        upkeepNeeded = timHasPassed && isOpen && hasBalance && hasPlayers;
+        // when this contract is called it will return whether or not upkeepNeeded is true or not. it will also return the performData but we are not using performData in this function so it is an empty string.
+        return (upkeepNeeded, "");
+    } // - chainlink nodes will call this function non-stop, and when it returns true, it will call performUpkeep.
+
+    function performUpkeep(bytes calldata /* performData */ ) external {
+        //
+        (bool upkeepNeeded,) = checkUpkeep("");
+        //
+        if (!upkeepNeeded) {
+            revert();
+        }
+    
+        s_raffleState = RaffleState.CALCULATING;
+
+        // the following is for calling to Chainlink VRF to get a randomNumber and has nothing to do with chainlink automation, this is just the automated task that is being performed in this example.
+        uint256 requestId = s_vrfCoordinator.requestRandomWords(
+            VRFV2PlusClient.RandomWordsRequest({
+                keyHash: i_keyHash, // how much gas you are willing to pay
+                subId: i_subscriptionId, // kinda of like a serial number for the request
+                requestConfirmations: REQUEST_CONFIRMATIONS, // how many blocks the VRF should wait before sending us the random number
+                callbackGasLimit: i_callbackGasLimit, // Max amount of gas you are willing to spend when the VRF sends the RNG back to you
+                numWords: NUM_WORDS, // the number of random numbers that we want
+                extraArgs: VRFV2PlusClient._argsToBytes(
+                    // Set nativePayment to true to pay for VRF requests with Sepolia ETH instead of LINK
+                    VRFV2PlusClient.ExtraArgsV1({nativePayment: false})
+                )
+            })
+        );
+    }
+```
+
+In this example, `checkUpkeep` checking to see if all the conditionals return true then if all the conditionals return true then the return boolean in the `checkUpkeep` function declaration returns true as well. Then once the `checkUpkeep` function returns that ` bool upkeepNeeded` is true, It will perform perform upkeep. The `performUpkeep` function makes sure that the `checkUpkeep` is true, then it calls for a random number to be generated from Chainlink VRF. (The Chainlink VRF to get a randomNumber task and has nothing to do with chainlink automation, this task is just the automated task that is being performed in this example. )
+
+
+
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+## MAKEFILE Notes
 
 A makefile is a way to create your own shortcuts. terminal commands in solidity can be very long, so you can essentially route your own shortcuts for terminal commands. Also, the `Makefile` needs to be `Makefile` and not `MakeFile` (the `f` needs to be lowercase) or `make` commands will not work.
 
@@ -923,12 +2269,12 @@ fundSubscription:
 
 
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-## Everything ZK-SYNC
+## Everything ZK-SYNC Notes
 
 Zk-sync is a rollup L2.
 
 
-### Zk-SYNC Foundry
+### Zk-SYNC Foundry Notes
 When deploying to ZK-sync, you want to use the zk-sync version of foundry. Learn more at https://github.com/matter-labs/foundry-zksync. learn more @ https://updraft.cyfrin.io/courses/foundry/foundry-simple-storage/foundry-zksync. this is course "Foundry Fundamentals" section 1, video #27 - #32
 
 0. run `forge --version`
@@ -945,10 +2291,10 @@ and if you want to switch back to zksync foundry, just run `foundryup-zksync` as
 
 when we run `forge build` in vanilla foundry, we get an `out` folder that has all the compilation details. when we run `forge build --zksync` in zksync foundry, we get a `zkout` folder with all the compilation details for zksync.
 
-### Deploying on ZK-SYNC
+### Deploying on ZK-SYNC Notes
 
 #### Running a local zkSync test node using Docker, and deploying a smart contract to the test node.
-to learn more, learn more @ https://github.com/Cyfrin/foundry-simple-storage-cu and at the bottom it has a "zn-Sync" intructions
+to learn more, learn more @ https://github.com/Cyfrin/foundry-simple-storage-cu and at the bottom it has a "zk-Sync" intructions
 
 run `foundryup-zksync`
 install docker.
@@ -969,6 +2315,7 @@ Will update this later!
 `ctrl` + `k`(in terminal) = clears terminal (VSCode)
 `ctrl` + `l` = open AI chat 
 `ctrl` + `n` = new tab
+`ctrl` + `p` = command pallet
 `ctrl` + `s` = save file
 `ctrl` + `v` = paste
 `ctrl` + `w` = closes currently active/focused tab
@@ -977,6 +2324,7 @@ Will update this later!
 `ctrl` + `/` = commenting out a line
 `ctrl` + ` = toggle terminal
 `ctrl` + `shift` + `t` = reopen the last closed tab
+`ctrl` + `shift` + `v` = paste without formating
 `ctrl` + <arrowKey> = move cursor to next word
 `ctrl` + `shift` + (←/→)<arrowKey> = select word by word
 `ctrl` + `shift` + (↑/↓)<arrowKey> = select line by line
