@@ -804,7 +804,25 @@ contract Raffle {
 }
 ```
 
+### Console.log Notes
 
+To use console.log, import the following into your contract:
+
+```js
+import {console} from "forge-std/console.log";
+```
+
+Then to use console.log, follow the format below:
+
+```js
+function exampleLog() external {
+    console.log("Hello!");
+
+    uint256 dog = 3;
+    // this will say "Dog is equal to 3"
+    console.log("Dog is equal to: ", dog); 
+}
+```
 
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -832,7 +850,6 @@ for example:
 ```javascript
  remappings = ["@chainlink/contracts/=lib/chainlink-brownie-contracts/contracts/"]  // in this example, we are telling foundry that everytime it sees @chainlink/contracts/ , it should point to lib/chainlink-brownie-contracts/ as this is where our packages that we just installed stays
  ```
-
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -938,6 +955,39 @@ If we need to test a part of our code that is outside of our system(example: pri
  run `forge coverage` to see how many lines of code have been tested.
 
  you only want to deploy mocks when you are working on a local chain like anvil.
+
+### Local Chain Tests Don't Work on Forked Chain Tests?
+
+If you have a test that passes on the local chain, but fails on a forked chain, this could be happening for several reasons.
+First off, you want to make sure that you are deploying the tests from some sort of burner metamask wallet when deploying on a forked chain. When you write a test on a local chain, it just spins us a fake and local chain and account to run the the tests on. To make sure you are correctly deploying from a burner metamask on a local chain, review the `vm.startBroadcast` section in the `Getting Started With Scripts` section of this notes file.
+
+Second off, some tests may fail on a forked chain instead of a local chain if the test is using mocks. So when running tests on a forked chain, we must skip over these tests that are meant for a local chain(tests with mocks). We can do this by creating a modifier that skips over the tests with this modifier.
+example:
+```js
+   modifier skipFork() {
+    // if the blockchain that we are deploying these tests on is not the local anvil chain, then return. When a function hits `return` it will not continue the rest of the logic 
+        if (block.chainid != LOCAL_CHAIN_ID) {
+            return;
+        }
+        _;
+    }
+
+     function testFulfillRandomWordsCanOnlyBeCalledAfterPerformUpkeep(uint256 randomRequestId)
+        public
+        raffleEntered
+        skipFork
+    {
+        // Arrange / Act / Assert
+        // we expect the following call to revert with the error of `VRFCoordinatorV2_5Mock`;
+        vm.expectRevert(VRFCoordinatorV2_5Mock.InvalidRequest.selector);
+        VRFCoordinatorV2_5Mock(vrfCoordinator).fulfillRandomWords(randomRequestId, address(raffle));
+    }
+```
+As you can see this test has the `skipFork` modifier that we made.
+
+
+
+
 
 ### Testing Events
 
@@ -1162,8 +1212,27 @@ function ...
 These don't have do be used together, but they should be used together to avoid issues and be technically correct.
 Example:
 ```js
+ function testCheckUpkeepReturnsFalseIfRaffleIsntOpen() public {
+        // Arrange
+        // next transaction will come from the PLAYER address that we made
+        vm.prank(PLAYER);
+        // PLAYER pays the entrance fee and enters the raffle
+        raffle.enterRaffle{value: entranceFee}();
+        // vm.warp allows us to warp time ahead so that foundry knows time has passed.
+        vm.warp(block.timestamp + interval + 1); // current timestamp + the interval of how long we can wait before starting another audit plus 1 second.
+        // vm.roll rolls the blockchain forward to the block that you assign. So here we are only moving it up 1 block to make sure that enough time has passed to start the lottery winner picking in raffle.sol
+        vm.roll(block.number + 1);
+        // now we can call performUpkeep and this will change the state of the raffle contract from open to calculating, which should mean no one else can join.
+        raffle.performUpkeep("");
 
+        Raffle.RaffleState raffleState = raffle.getRaffleState();
+        // Act
+        (bool upkeepNeeded,) = raffle.checkUpkeep("");
+        // Assert
+        assert(!upkeepNeeded);
+    }
 ```
+
  ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  ## Chisel Notes
 
@@ -1305,6 +1374,92 @@ contract DeployRaffle is Script {
     }
 }
 
+```
+
+`vm.startBroadcast` & `vm.stopBroadcast`: All logic inbetween these two cheatcodes will be broadcasted/executed directly onto the blockchain.
+example: (from `foundry-smart-contract-lottery/script/DeployRaffle.s.sol`)
+```js
+contract DeployRaffle is Script {
+    function run() public {
+        deployContract();
+    }
+
+    function deployContract() public returns (Raffle, HelperConfig) {
+        // deploy a new helpconfig contract that grabs the chainid and networkConfigs
+        HelperConfig helperConfig = new HelperConfig();
+        // grab the network configs of the chain we are deploying to and save them as `config`.
+        // its also the same as doing ` HelperConfig.NetworkConfig memory config = helperConfig.getConfigByChainId(block.chainid);`
+        HelperConfig.NetworkConfig memory config = helperConfig.getConfig();
+
+        // if the subscription id does not exist, create one
+        if (config.subscriptionId == 0) {
+            // deploys a new CreateSubscription contract from Interactions.s.sol and save it as a variable named createSubscription
+            CreateSubscription createSubscription = new CreateSubscription();
+            // calls the createSubscription contract's createSubscription function and passes the vrfCoordinator from the networkConfigs dependent on the chain we are on. This will create a subscription for our vrfCoordinator. Then we save the return values of the subscriptionId and vrfCoordinator and vrfCoordinator as the subscriptionId and values in our networkConfig.
+            (config.subscriptionId, config.vrfCoordinator) =
+                createSubscription.createSubscription(config.vrfCoordinator);
+
+            // creates and deploys a new FundSubscription contract from the Interactions.s.sol file.
+            FundSubscription fundSubscription = new FundSubscription();
+            // calls the `fundSubscription` function from the FundSubscription contract we just created and pass the parameters that it takes.
+            fundSubscription.fundSubscription(config.vrfCoordinator, config.subscriptionId, config.link);
+        }
+
+        // everything between startBroadcast and stopBroadcast is broadcasted to a real chain
+        vm.startBroadcast();
+        // create a new raffle contract with the parameters that are in the Raffle's constructor. This HAVE to be in the same order as the constructor!
+        Raffle raffle = new Raffle(
+            // we do `config.` before each one because our helperConfig contract grabs the correct config dependent on the chain we are deploying to
+            config.entranceFee,
+            config.interval,
+            config.vrfCoordinator,
+            config.gasLane,
+            config.subscriptionId,
+            config.callBackGasLimit
+        );
+        vm.stopBroadcast();
+
+        // creates and deploys a new AddConsumer contract from the Interactions.s.sol file.
+        AddConsumer addConsumer = new AddConsumer();
+        // calls the `addConsumer` function from the `AddConsumer` contract we just created/deplyed and pass the parameters that it takes.
+        addConsumer.addConsumer(address(raffle), config.vrfCoordinator, config.subscriptionId);
+
+        // returns the new raffle and helperconfig that we just defined and deployed so that these new values can be used when this function `deployContracts` is called
+        return (raffle, helperConfig);
+    }
+}
+```
+
+However, the `vm.startBroadcast` can also be passed in the account that will be sending these transactions
+example: from `foundry-smart-contract-lottery-f23`
+```js
+    // these are the items that the constructor in DeployRaffle.s.sol takes
+    struct NetworkConfig {
+        uint256 entranceFee;
+        uint256 interval;
+        address vrfCoordinator;
+        bytes32 gasLane;
+        uint32 callBackGasLimit;
+        uint256 subscriptionId;
+        address link;
+        address account;
+    }
+
+    ...
+
+     // everything between startBroadcast and stopBroadcast is broadcasted to a real chain and the account from the helperConfig is the one making the transactions
+        vm.startBroadcast(config.account);
+        // create a new raffle contract with the parameters that are in the Raffle's constructor. This HAVE to be in the same order as the constructor!
+        Raffle raffle = new Raffle(
+            // we do `config.` before each one because our helperConfig contract grabs the correct config dependent on the chain we are deploying to
+            config.entranceFee,
+            config.interval,
+            config.vrfCoordinator,
+            config.gasLane,
+            config.subscriptionId,
+            config.callBackGasLimit
+        );
+        vm.stopBroadcast();
 ```
 
 ### HelperConfig Script Notes
@@ -1588,7 +1743,39 @@ To programtically verify a contract, you must do it while deploying. When deploy
 Example:
 `forge script script/DeployFundMe.s.sol:DeployFundMe --rpc-url $SEPOLIA_RPC_URL --account <accountName> --sender <address> --broadcast --verify --etherscan-api-key $ETHERSCAN_API_KEY -vvvv`
 
+#### If a Deployed Contract does not Verify Correctly
 
+
+If a deployed contract does not verify correctly during deployment, we can then do the following to verify a contract:
+
+1. Run `forge verify-contract <contract-address> <contract> --etherscan-api-key $ETHERSCAN_API_KEY --rpc-url $SEPOLIA_RPC_URL --show-standard-json-input > json.json`
+
+Arguments:
+  <ADDRESS>
+          The address of the contract to verify
+
+  [CONTRACT]
+          The contract identifier in the form `<path>:<contractname>`
+
+example: `forge verify-contract 0x123456789 src/Raffle.sol:Raffle --etherscan-api-key $ETHERSCAN_API_KEY --rpc-url $SEPOLIA_RPC_URL --show-standard-json-input > json.json` 
+
+Make sure you have a ETHERSCAN_API_KEY and SEPOLIA_RPC_URL in your .env file.
+
+This command will create a new json.json in your root directory.
+
+2. Go to the file and press `ctrl` + `shift` + `p` and search for and select `format`. This json.json file is what is known as the standard json and is what verifiers will use to actually verify a contract.
+
+3. Go back to etherscan, in your contract tab where your contract should be verified. Click `Verify and publish`. This will take you to a page to select/fill details about your contract, such as the address of the contract, the compiler type and version and Open Source License Type (probably MIT). For the Compiler type, choose `Solidity (Standard-Json-Input)` and the compiler version you are using in your contract(s). 
+
+4. Click COntinue and on the next page it will ask you to select the `Standard-Json-Input` file to upload, here is where you will upload the json.json file we just made earlier. 
+
+5. Click `I'm not a robot` and verify and publish!
+
+
+
+#### ALL --VERIFY OPTIONS NOTES
+
+To see all the options of verifying a contract with forge, run `forge verify-contract --help`
 
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -1689,8 +1876,345 @@ For example:
 
 ## ChainLink Notes:
 
+### Chainlink Functions
+Chainlink functions allow you to make any API call in a decentralized context through decentralized nodes. Chainlink functions will be the future of DeFi and smart contracts. If you want to make something novel and something that has never been done before, you should check out chainlink functions. You can learn more about chainlink functions at `docs.chain.link/chainlink-functions`.
+
 ### Aggregator PriceFeeds Notes
-To Be filled out...
+Smart Contracts by themselves cannot access data outside of their own contracts. They cannot tell what the price of tokens are, what day it is, or who the president is. This is where chainlink datafeeds come in. Chainlink datafeeds take in data from many decentralized sources and their decentralized chainlink nodes decide what data is true based off their many decentralized sources. You can learn more about chainlink datafeeds in the chaink docs at `docs.chain.link` or at `https://updraft.cyfrin.io/courses/solidity/fund-me/real-world-price-data`.
+
+Pricefeeds are a type of datafeed from chainlink. You can see examples at data.chain.link. To use pricefeeds, 
+
+
+
+
+
+example (from foundry-fund-me-f23):
+create a library that uses the AggregatorV3Interface from chainlink: 
+```js
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.18;
+
+import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
+
+library PriceConverter {
+    // libraries cannot have any state variables. State Variables are variables declared on the contract level.
+    //  this function will get the price of the naive blockchain token(in this case its eth) in terms of USD
+    function getPrice(AggregatorV3Interface dataFeed) internal view returns (uint256) {
+        // to reach out to this contract, we need the Address and the ABI
+        // address: 0x694AA1769357215DE4FAC081bf1f309aDC325306 ✅ (This is the address of the ETH/USD datafeed from chainlink)
+        // ABI: Chainlink's AggregatorV3Interface ✅(the interface acts like an ABI). when we combine a contracr address with the interface, we can easily call the functions in that contract
+        // the formating of this code comes from the docs of chainlink which can be found at https://docs.chain.link/data-feeds/using-data-feeds
+        // the formating of this code comes from the docs of chainlink which can be found at https://github.com/smartcontractkit/chainlink/blob/develop/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol
+        (, int256 answer,,,) = dataFeed.latestRoundData();
+        // ^ because we dont need the other items, we can just remove them and keep the commas.
+        // this will return the price of ETH in terms of USD
+        // so if the value is $3k, it will show as 300000000000 (8decimals).
+        return uint256(answer * 1e10);
+        // ^ we multiply this by 1e10 to get 18 decimals instead of 8!
+        // ^^ we typecast this with uint256 because the answer returned is in int and we need it in uint. This is because int can be negative and this can lead to bugs. Uint can never be negative. Also, we typecasted because our msg.value is type uint and answer is type int, so we need to convert it.
+        // to typecast means we did that uint256() around the answer * 1e10 to convert it to a different type.
+    }
+
+    // this function will convert the msg.value price(in the fund function) of eth into USD
+    function getConversionRate(uint256 ethAmount, AggregatorV3Interface dataFeed) internal view returns (uint256) {
+        uint256 ethPrice = getPrice(dataFeed);
+        // we divide this by 1e18 because both eth price and ethAmount have 18 zeros, so the outcome would be 36 zeros if we dont divide.
+        // you always want to multiply before you divide.
+        // the user inputs in ethAmount
+        uint256 ethAmountInUsd = (ethPrice * ethAmount) / 1e18;
+        return ethAmountInUsd;
+    }
+}
+
+```
+
+Use the library in the main contract to get price of assets:
+```js
+// when starting a new project, write down what you want the code to do
+
+// get funds from users
+// withdraw funds
+// set a minimum funding value is USD
+
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.18;
+
+import {PriceConverter} from "./PriceConverter.sol";
+import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
+
+// when naming your errors, always name them with the contract name so you know what contract it came from
+error FundMe__NotOwner(); // custom errors save a ton of gas
+// ^ two underscores is the convention ^
+
+contract FundMe {
+    // to attach the Price Converter functions to all uint256s:
+    using PriceConverter for uint256;
+
+    // uint256 public minimumUsd = 5 * (10 ** 18); // you can do this
+    uint256 public constant MINIMUM_USD = 5e18; // this is the same as above. We do this because solidity needs to know to keep it in terms of eth.
+    // this is marked with "constant" to save gas. Now when this contract is deployed, this variable will be stored into the bytecode instead of a storage slot. ** Only use constant on variables that will never change and these cannot be changed later on. **
+    // constant variables should be capitalized and use underscores
+
+    // an array of addresses called funders.
+    address[] private s_funders;
+
+    // a mapping, mapping the addresses and their amount funded.
+    // the names "funder" and "amountFunded" is "syntaxic sugar", just makes it easier to read
+    mapping(address funder => uint256 amountFunded) private s_addressToAmountFunded;
+
+    // to be used in constructor
+    address private immutable i_owner; // variables declared in the contract level but defined in the constructor, can be marked as immutable if they will not change. This will save gas
+    // immutable varibles should use "i_" in their name
+
+    // this variable is of type AggregatorV3Interface, and is used in the constructor. So that when deployed, the contract will read what chain we are on and use the correct pricefeed.
+    AggregatorV3Interface private s_priceFeed;
+
+    // the constructor is a function that gets immediately called when the contract is deployed.
+    // the priceFeed parameter means that it takes a pricefeed address, and this will depend on the chain we are deploying to. This way the codebase is much more modular.
+    constructor(address priceFeed) {
+        // this pricefeed address is set in the deployment script input!
+        // makes the deployer of this contract the "owner" of this contract.
+        i_owner = msg.sender;
+        s_priceFeed = AggregatorV3Interface(priceFeed);
+    }
+
+    // the "payable" keyword is allows functions to be sent $ from users
+    function fund() public payable {
+        // Allow users to send $
+        // Have a minimum $ sent
+        // 1e18 is equal to 1 ETH(which is also 1,000,000,000,000,000,000 wei(18-zeros)(which is also 1 * 10 ** 18(in solidity,  ** means exponent)))
+        // require means if <first section> is false, then revert with the message of <second section>
+        // because we are using the PriceConverter for all uint256, all uint256s now have access to getConversionRate. This way, when we write "msg.value.getConversionRate", the first value will be the first parameter, which is msg.value. So msg.value is ethAmount in the getConversionRate function. If we had a second parameter in the getConversaionRate, the second paramter would be whatever input would be passed into msg.value.getConversionRate() (in this case there is no second value).
+        require(msg.value.getConversionRate(s_priceFeed) >= MINIMUM_USD, "didn't send enough ETH"); // "didn't send enough ETH" is the revert message if it reverts if the user does not send more than 1 eth.
+        // msg.value is always in terms of ETH/wei
+        // if the require statement fails, then all actions or code that have been executed in that function will revert as well.
+        // if you send a failed transaction, you will still spend all as up to that failed transaction, if any remaining gas will be returned to the user.
+
+        // this line keeps track of how much each sender has sent
+        // you read it like: mapping(check the mapping) address => amount sent of the sender. So how much the sender sent = how much the sender has sent plus how much he is currently sending.
+        // addressToAmountFunded[msg.sender] = addressToAmountFunded[msg.sender] + msg.value;
+        //above is the old way. below is the shortcut with += . This += means we are adding the new value to the existing value that already exists.
+        s_addressToAmountFunded[msg.sender] += msg.value;
+
+        // the users whom successfully call this function will be added to the array.
+        s_funders.push(msg.sender);
+    }
+
+    // we are making a cheaper Withdraw function because function `withdraw` is very expensive. When you read and write to storage it is very expensive. Whereas if you read and write to memory it is much much cheaper. Check evm.codes(website) to see how much each opcode cost in gas.
+    function cheaperWithdraw() public onlyOwner {
+        uint256 funderLength = s_funders.length; // this way we are only reading from the storage array `funders` one time and saving it as a memory variable
+        for (uint256 funderIndex = 0; funderIndex < funderLength; funderIndex++) {
+            // then here we loop through the memory instead of the storage
+            address funder = s_funders[funderIndex];
+            s_addressToAmountFunded[funder] = 0;
+        }
+        s_funders = new address[](0);
+        (bool callSuccess, /* bytes memory dataReturned */ ) =
+            payable(msg.sender).call{value: address(this).balance}(""); /*<- this is where we would put info of another function if we were calling another function(but we arent here so we leave it blank) */
+        require(callSuccess, "Call Failed");
+    }
+
+    function withdraw() public onlyOwner {
+        // for loop explanation:
+        // [1, 2, 3, 4] elements   <-- below
+        //  0, 1, 2, 3  indexes    <- so we would loop through the indexes to get all the elements out of this array
+
+        // in a for loop, you first give it the starting index, then the ending index, and then the step amount
+        // for example, if you want to go start at the 0th index, end at the 10th index, and increase by 1 every time, then it would be for (uint256 i = 0; i <= 10; i++)
+        for (uint256 funderIndex = 0; funderIndex < s_funders.length; /* length of the funders array */ funderIndex++) {
+            /*++ means to add 1 after everytime we go through the following code in the brackets: */
+            // we get the index position of the funders array, name this element funder
+            address funder = s_funders[funderIndex];
+            // then we reset this funders amount(this is tracked by the mapping of "addressToAmountFunded") to 0 when he withdraws
+            s_addressToAmountFunded[funder] = 0;
+        }
+        s_funders = new address[](0);
+
+        // there are three ways to transfer the funds: transfer, send, and call
+
+        // msg.sender is of type address
+        // payable(msg.sender) is of type payable address
+
+        // transfers balance from this contract's balance to the msg.sender
+        // payable(msg.sender).transfer(address(this).balance); //  this is how you use transfer
+        // ^there is an issue with using transfer, as if it uses more than 2,300 gas it will throw and error and revert. (sending tokens from one wallet to another is already 2,100 gas)
+
+        // we need to use "bool" here because when using "send", if the call fails, it will not revert the transaction and the user would not get their money. ("send" also fails at 2,300 gas)
+        // bool sendSuccess = payable(msg.sender).send(address(this).balance);
+        // require sendSuccess to be true or it reverts with "Send Failed"
+        // require(sendSuccess, "Send failed");
+
+        // using "call" is lower level solidity and is very powerful, is the best one to use most of the time.
+        // "call" can be used to call almost every function in all of ethereum without having an ABI!
+        // using "call" returns a boolean and bytes data. The bytes arent important here so we commented it out and left the comma. (but really we would delete it if this was a production contract and we would leave the comma. however if we were calling a function we would keep the bytes data) (bytes objects are arrays which is why we use the memory keyword).
+        (bool callSuccess, /* bytes memory dataReturned */ ) = payable(msg.sender).call{value: address(this).balance}(
+            "" /*<- this is where we would put info of another function if we were calling another function(but we arent here so we leave it blank) */
+        );
+        //        calls the value to send to the payable(msg.sender)^
+
+        // require callSuccess to be true or it reverts with "Call Failed"
+        require(callSuccess, "Call Failed");
+    }
+
+    function getVersion() public view returns (uint256) {
+        // this works because the address defined is correlated the functions "AggregatorV3Interface" and "version". We also imported the "AggregatorV3Interface" from chainlink.
+        // return AggregatorV3Interface(0x694AA1769357215DE4FAC081bf1f309aDC325306).version();
+        // ^ we refactored this code because it was hardcoded to sepolia, to make it more modular, we change it to (below): ^
+        return s_priceFeed.version();
+        // ^this is more modular because now it will get the address of the pricefeed dependant on the chain we deployed to. ^
+    }
+
+    function getDecimals() public view returns (uint8) {
+        return AggregatorV3Interface(0x694AA1769357215DE4FAC081bf1f309aDC325306).decimals();
+    }
+
+    modifier onlyOwner() {
+        // requires the owner to be the only person allowed to call this withdraw function or reverts with "Must be Owner!"
+        // require(msg.sender == i_owner, "Must be Owner!");
+
+        // changed to use custom errors to save a ton of gas since. This saves alot of gas since we do not need to store and emit the revert Strings if the require statement fails.
+        // this says that if the sender of the message is not the owner, then revert with custom error NotOwner.
+        if (msg.sender != i_owner) {
+            revert FundMe__NotOwner();
+        }
+
+        // always needs to be in the modifier because modifiers are executed first in functions, then this underscore shows that after the modifier code is executed, to then go on and execute the code in the fucntion with the modifier.
+        _;
+        // if we had the underscore above the logic in this modifier, this means that we would execute the logic in the function with this modifier first and then execute the modifier's logic. So the order of the underscore matters!!!
+    }
+
+    // receive function is called when a transaction is sent to a contract that has no data. it can have not not have funds, but if it has no data, it will be received by the receive function. (the contract needs to have a receive function)
+    receive() external payable {
+        fund();
+    }
+
+    // fallback function is called when a transaction is sent to a contract with data, for example like if a user calls a function that does not exist, then it will be handled by the fallback function. (the contract needs to have a fallback function). the fallback function can also be used if the receive function is not defined.
+    fallback() external payable {
+        fund();
+    }
+
+    // Note: view functions use gas when called by a contract but not when called by a person.
+
+    // if something is "unchecked", then that means when a value hits its max + 1, it will reset to 0.
+    // after 0.8.0 of solidity, if a number reaches its max, the number will then fail instead of reseting. instead of overflowing or underflowing, it just fails.
+
+    /**
+     * View / Pure Functions (These are going to be our Getters)
+     * Below are our Getter functions. by making storage variables private, they save more gas. Then by making view/pure functions to get the data within the private storage functions, it also makes the code much more readable.
+     * These are called getter functions because all they do is read and return private data from the contracts storage without modifying the contract state.
+     */
+
+    // This function allows anyone to check how much eth a specific address has funded to the contract.
+    function getAddressToAmountFunded(address fundingAddress) external view returns (uint256) {
+        // takes the fundingAddress parameter that users input and reads and returns the amount that that address has funded. It is accessing the mapping of s_addressToAmountFunded which stores the funding history.
+        return s_addressToAmountFunded[fundingAddress];
+    }
+
+    //this function allows anyone to input a number(index) and they will see whos address is at that index(number).
+    function getFunder(uint256 index) external view returns (address) {
+        return s_funders[index];
+    }
+
+    function getOwner() external view returns (address) {
+        return i_owner;
+    }
+}
+
+```
+
+Have an `HelperConfig.s.sol` file that grabs the correct address of the pricefeed dependent on the chain we are deploying to:
+```js
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.18;
+
+/* this contract will do the following:
+1. Deploy mocks when we are on a local Anvil Chain
+2. Keep track of contract addresses across different chains
+*/
+
+import {Script} from "forge-std/Script.sol";
+import {FundMe} from "../src/FundMe.sol";
+import {MockV3Aggregator} from "../test/mocks/MockV3Aggregator.sol";
+
+contract HelperConfig is Script {
+    // If we are on a local anvil, we deploy mocks.
+    // Otherwise, grab the existing address from the live network.
+
+    // we are declaring a variable named activeNetworkConfig of type struct NetworkConfig to use
+    NetworkConfig public activeNetworkConfig;
+
+    // to reduce magic numbers we defined these. these are the decimal count and start price of ETH/USD in the mockV3Aggregator.
+    uint8 public constant DECIMALS = 8;
+    int256 public constant INITIAL_PRICE = 2000e8;
+
+    // the items inside the FundMe.sol constructor
+    struct NetworkConfig {
+        address priceFeed; // ETH/USD pricefeed address
+    }
+
+    constructor() {
+        // every blockchain has a chainId. The `block.chainid` is a key word from solidity.
+        // this is saying "if we the chain we are on has a chainId of 11155111, then use `getSepoliaEthConfig()` (this getSepoliaEthConfig function returns the pricefeed address to use)"
+        if (block.chainid == 11155111) {
+            activeNetworkConfig = getSepoliaEthConfig();
+        } else if (block.chainid == 1) {
+            // this is saying "if we the chain we are on has a chainId of 1, then use `getMainnetEthConfig()` (this getMainnetEthConfig function returns the pricefeed address to use)"
+            activeNetworkConfig = getMainnetEthConfig();
+        } else {
+            // if the chain is not 11155111, then use `getAnvilEthConfig()` (the getAnvilEthConfig function uses a mock to simulate the pricefeed since its a fake temporary empty blockchain and does not have chainlink pricefeeds)
+            activeNetworkConfig = getOrCreateAnvilEthConfig();
+        }
+    }
+
+    function getSepoliaEthConfig() public pure returns (NetworkConfig memory) {
+        // we want to get the price feed address.
+        // but what if we want more than just one variable? We create a struct (so we made struct NetworkConfig)!
+
+        // this grabs the pricefeed address that we hardcoded and saves it to a variable named sepoliaConfig
+        NetworkConfig memory sepoliaConfig = NetworkConfig({priceFeed: 0x694AA1769357215DE4FAC081bf1f309aDC325306});
+        // returns the variable sepoliaConfig when this function is called.
+        return sepoliaConfig; //  This returns the pricefeed address saved in the variable gets passed to the deployment script to let it know what the address it to pull data from the address.
+    }
+
+    function getMainnetEthConfig() public pure returns (NetworkConfig memory) {
+        // we want to get the price feed address.
+        // but what if we want more than just one variable? We create a struct (so we made struct NetworkConfig)!
+
+        // this grabs the pricefeed address that we hardcoded and saves it to a variable named sepoliaConfig
+        NetworkConfig memory ethConfig = NetworkConfig({priceFeed: 0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419});
+        // returns the variable sepoliaConfig when this function is called.
+        return ethConfig; //  This returns the pricefeed address saved in the variable gets passed to the deployment script to let it know what the address it to pull data from the address.
+    }
+
+    function getOrCreateAnvilEthConfig() public returns (NetworkConfig memory) {
+        // we want to get the price feed address, but this is anvils local blockchain, that does not have pricefeeds.
+        // so we need to deploy mocks onto the local blockchain(anvil) to simulate pricefeeds.
+
+        // 1. Deploy Mocks
+        // 2. Return the Mock addresses
+
+        // this if statement is saying that if we already have deployed a mockV3Aggregator, to use that one instead of deploying a new one everytime.
+        // if it is not address 0 then this means we already deployed it and it has an address, otherwise it would be 0 if it didnt exist.
+        if (activeNetworkConfig.priceFeed != address(0)) {
+            return activeNetworkConfig;
+        } // we do not need an "else" clause here because once a return statement in a function is executed, the function immediately exits and no further code in that function will run.
+
+        // everything inbetween the startBroadcast is being broadcasted to the blockchain. So here we are deploying the mock to anvil.
+        vm.startBroadcast();
+        // this says to deploy a new MockV3Aggregator and save it in a variable of MockV3Aggregator named mockPriceFeed.
+        MockV3Aggregator mockPriceFeed = new MockV3Aggregator(DECIMALS, INITIAL_PRICE);
+        // ^ we passed `8` and `2000e8` as parameters because the MockV3Aggregator's constructor asks for decimals and inital price. So here we are saying that the pair price feed that we are mocking(eth/usd) has 8 decimals and the starting price is 2000 with 8 decimals(2000e8). ^
+        vm.stopBroadcast();
+
+        // grabs the address of the mock pricefeed (within the struct we declared) and saves it as variable of type struct NetworkConfig named anvilConfig
+        NetworkConfig memory anvilConfig = NetworkConfig({priceFeed: address(mockPriceFeed)});
+        // returns this variable anvilConfig when this function is called. This returns the pricefeed address saved in the variable gets passed to the deployment script to let it know what the address it to pull data from the address.
+        return anvilConfig;
+    }
+}
+
+```
+
 
 
 ### Chainlink VRF 2.5 Notes
@@ -2109,6 +2633,7 @@ contract DeployRaffle is Script {
 
 ```
 
+13. Finally, after we deploy the contract onto a testnet or mainnet, we need to register the new Upkeep with chainlink. To do this, go to vrf.chain.link and connect your wallet that deployed the contract. You should see that you have a new consumer added. Then switch from VRF, to automation and register a new Upkeep.
 
 ### Chainlink Automation (Custom Logic) Notes 
 
@@ -2188,7 +2713,7 @@ Example:
 In this example, `checkUpkeep` checking to see if all the conditionals return true then if all the conditionals return true then the return boolean in the `checkUpkeep` function declaration returns true as well. Then once the `checkUpkeep` function returns that ` bool upkeepNeeded` is true, It will perform perform upkeep. The `performUpkeep` function makes sure that the `checkUpkeep` is true, then it calls for a random number to be generated from Chainlink VRF. (The Chainlink VRF to get a randomNumber task and has nothing to do with chainlink automation, this task is just the automated task that is being performed in this example. )
 
 
-
+3. Finally, after we deploy the contract onto a testnet or mainnet, we need to register the new Upkeep with chainlink. To do this, go to automation.chain.link and register a new Upkeep. Connect your wallet that deployed the contract, and register the new upkeep. Click "Custom Logic" since that is what we are most likely using, then click next and it will prompt you for your contracts address. Input the contract address of the contract that was just deployed tat uses the Chainlink Automation. Then click next and enter the Upkeep details, such as the contract name and starting balance (it will ask for optional items, but you do not need to fill these out.). Then just click `Register Upkeep` and confirm the transaction in your metamask.
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -2200,14 +2725,7 @@ If you want to include the `.env` variables, then at the top of the MakeFile, wr
 
 The way to create a short cut in a Makefile is to write the shortcut on the left, and the command that is being rerouted goes on the right in the following format:
 `build:; forge build`. OR the shortcut goes on the left, and the command being rerouted goes below and indented with TAB in the format of:
-```MakeFile
-build:
-    forge build 
-```
 
-Then to run a Makefile command, run `make <shortcut-name>`. Example: `make build` !!!
-For example:
-(the .PHONY is to tell the MakeFile that the commands are not folders)
 ```MakeFile
 -include .env
 
@@ -2263,9 +2781,12 @@ fundSubscription:
 	@forge script script/Interactions.s.sol:FundSubscription $(NETWORK_ARGS)
 
 
+
 ```
 
-
+Then to run a Makefile command, run `make <shortcut-name>`. Example: `make build` !!!
+For example:
+(the .PHONY is to tell the MakeFile that the commands are not folders)
 
 
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -2306,6 +2827,63 @@ Will update this later!
 
 
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+## ERC-20s
+
+ERC = Ethereum Request of Comments
+
+ERC-20s are the industry standard of Tokens. ERC-20s represent tokens, but they are also smart contracts.
+
+
+
+
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+## EIP Notes 
+
+EIP = Ethereum Improvement Proposal
+
+EIPs are a way for the community to suggest improvements to industry standards.
+
+
+
+### EIP status terms
+1. Idea - An idea that is pre-draft. This is not tracked within the EIP Repository.
+
+2. Draft - The first formally tracked stage of an EIP in development. An EIP is merged by an EIP Editor into the EIP repository when properly formatted.
+
+3. Review - An EIP Author marks an EIP as ready for and requesting Peer Review.
+
+4. Last Call - This is the final review window for an EIP before moving to FINAL. An EIP editor will assign Last Call status and set a review end date (`last-call-deadline`), typically 14 days later. If this period results in necessary normative changes it will revert the EIP to Review.
+
+5. Final - This EIP represents the final standard. A Final EIP exists in a state of finality and should only be updated to correct errata and add non-normative clarifications.
+
+6. Stagnant - Any EIP in Draft or Review if inactive for a period of 6 months or greater is moved to Stagnant. An EIP may be resurrected from this state by Authors or EIP Editors through moving it back to Draft.
+
+7. Withdrawn - The EIP Author(s) have withdrawn the proposed EIP. This state has finality and can no longer be resurrected using this EIP number. If the idea is pursued at later date it is considered a new proposal.
+
+8. Living - A special status for EIPs that are designed to be continually updated and not reach a state of finality. This includes most notably EIP-1.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+
 
 ## Keyboard Shortcuts:
 
